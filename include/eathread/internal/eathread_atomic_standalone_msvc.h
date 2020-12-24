@@ -12,65 +12,76 @@
 //
 #if defined(EA_PLATFORM_MICROSOFT)
 	EA_DISABLE_ALL_VC_WARNINGS()
-	#include <xatomic.h>
+	#include <intrin.h>
 	EA_RESTORE_ALL_VC_WARNINGS()
 
-	extern "C" long           _InterlockedIncrement(long volatile* Addend);
-	extern "C" long           _InterlockedDecrement(long volatile* Addend);
-	extern "C" long           _InterlockedCompareExchange(long volatile* Dest, long Exchange, long Comp);
-	extern "C" long           _InterlockedExchange(long volatile* Target, long Value);
-	extern "C" long           _InterlockedExchangeAdd(long volatile* Addend, long Value);
-	extern "C" int64_t        _InterlockedCompareExchange64(int64_t volatile* Dest, int64_t Exchange, int64_t Comp);
+	#if defined(EA_PROCESSOR_X86)
+		#if defined(_InterlockedExchange64_INLINE)
+			#define _InterlockedExchange64		_InterlockedExchange64_INLINE
+			#define _InterlockedExchangeAdd64	_InterlockedExchangeAdd64_INLINE
+			#define _InterlockedAnd64			_InterlockedAnd64_INLINE
+			#define _InterlockedOr64			_InterlockedOr64_INLINE
+			#define _InterlockedXor64			_InterlockedXor64_INLINE
+		#else
+			namespace EA {
+			namespace Thread {
+			namespace Internal {
+				template <typename PtrT, typename T, typename ValueTransformOp>
+				T CAS64Helper(PtrT* ptr, T newVal, ValueTransformOp op)
+				{
+					T oldVal;
 
-	#pragma intrinsic (_InterlockedCompareExchange)
-	#define InterlockedCompareExchangeImp _InterlockedCompareExchange
+					do
+					{
+						oldVal = static_cast<T>(*ptr);
+					} while (oldVal != _InterlockedCompareExchange64(ptr, op(oldVal, newVal), oldVal));
 
-	#pragma intrinsic (_InterlockedExchange)
-	#define InterlockedExchangeImp        _InterlockedExchange 
+					return oldVal; 
+				}
+			}}}
 
-	#pragma intrinsic (_InterlockedExchangeAdd)
-	#define InterlockedExchangeAddImp     _InterlockedExchangeAdd
+			template <typename T1, typename T2>
+			auto _InterlockedExchange64(T1* ptr, T2 value)
+			{
+				return EA::Thread::Internal::CAS64Helper(ptr, value, [](auto o, auto n) { return n; });
+			}
 
-	#pragma intrinsic (_InterlockedIncrement)
-	#define InterlockedIncrementImp       _InterlockedIncrement
+			template <typename T1, typename T2>
+			auto _InterlockedExchangeAdd64(T1* ptr, T2 value)
+			{
+				return EA::Thread::Internal::CAS64Helper(ptr, value, [](auto o, auto n) { return o + n; });
+			}
 
-	#pragma intrinsic (_InterlockedDecrement)
-	#define InterlockedDecrementImp       _InterlockedDecrement
+			template <typename T1, typename T2>
+			auto _InterlockedAnd64(T1* ptr, T2 value)
+			{
+				return EA::Thread::Internal::CAS64Helper(ptr, value, [](auto o, auto n) { return o & n; });
+			}
 
-	#pragma intrinsic (_InterlockedCompareExchange64)
-	#define InterlockedCompareExchange64Imp _InterlockedCompareExchange64
+			template <typename T1, typename T2>
+			auto _InterlockedOr64(T1* ptr, T2 value)
+			{
+				return EA::Thread::Internal::CAS64Helper(ptr, value, [](auto o, auto n) { return o | n; });
+			}
+
+			template <typename T1, typename T2>
+			auto _InterlockedXor64(T1* ptr, T2 value)
+			{
+				return EA::Thread::Internal::CAS64Helper(ptr, value, [](auto o, auto n) { return o ^ n; });
+			}
+		#endif
+	#endif
 
 	inline bool InterlockedSetIfEqual(volatile int64_t* dest, int64_t newValue, int64_t condition)
 	{
-		return (InterlockedCompareExchange64Imp(dest, newValue, condition) == condition);
+		return (_InterlockedCompareExchange64(dest, newValue, condition) == condition);
 	}
 
 	inline bool InterlockedSetIfEqual(volatile uint64_t* dest, uint64_t newValue, uint64_t condition)
 	{
-		return (InterlockedCompareExchange64Imp((int64_t volatile*)dest, (int64_t)newValue, (int64_t)condition) == (int64_t)condition);
+		return (_InterlockedCompareExchange64((int64_t volatile*)dest, (int64_t)newValue, (int64_t)condition) == (int64_t)condition);
 	}
 
-	#ifndef InterlockedCompareExchangeImp // If the above intrinsics aren't used... 
-		extern "C" __declspec(dllimport) long __stdcall InterlockedIncrement(long volatile * pAddend);
-		extern "C" __declspec(dllimport) long __stdcall InterlockedDecrement(long volatile * pAddend);
-		extern "C" __declspec(dllimport) long __stdcall InterlockedExchange(long volatile * pTarget, long value);
-		extern "C" __declspec(dllimport) long __stdcall InterlockedExchangeAdd(long volatile * pAddend, long value);
-		extern "C" __declspec(dllimport) long __stdcall InterlockedCompareExchange(long volatile * pDestination, long value, long compare);
-
-		#define InterlockedCompareExchangeImp InterlockedCompareExchange
-		#define InterlockedExchangeImp        InterlockedExchange
-		#define InterlockedExchangeAddImp     InterlockedExchangeAdd
-		#define InterlockedIncrementImp       InterlockedIncrement
-		#define InterlockedDecrementImp       InterlockedDecrement
-	#endif
-
-	#if defined(EA_PROCESSOR_X86)
-		#define _InterlockedExchange64		_InterlockedExchange64_INLINE
-		#define _InterlockedExchangeAdd64	_InterlockedExchangeAdd64_INLINE
-		#define _InterlockedAnd64			_InterlockedAnd64_INLINE
-		#define _InterlockedOr64			_InterlockedOr64_INLINE
-		#define _InterlockedXor64			_InterlockedXor64_INLINE
-	#endif
 #endif // EA_PLATFORM_MICROSOFT
 
 

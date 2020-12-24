@@ -7,51 +7,14 @@
 #include <eathread/eathread_storage.h>
 #include <string.h>
 
-EA_DISABLE_VC_WARNING(4172) // returning address of local variable or temporary
+
+EA_DISABLE_VC_WARNING(4172); // returning address of local variable or temporary
+
 
 namespace EA
 {
 namespace Thread
 {
-
-
-EATHREADLIB_API void InitCallstack()
-{
-}
-
-EATHREADLIB_API void ShutdownCallstack()
-{
-}
-
-EATHREADLIB_API size_t GetCallstack(void* /*callstack*/[], size_t /*maxDepth*/, const CallstackContext* /*pContext*/)
-{
-	return 0;
-}
-
-EATHREADLIB_API bool GetCallstackContext(CallstackContext& /*context*/, intptr_t /*threadId*/)
-{
-	return false;
-}
-
-EATHREADLIB_API bool GetCallstackContextSysThreadId(CallstackContext& /*context*/, intptr_t /*sysThreadId*/)
-{
-	return false;
-}
-
-EATHREADLIB_API void GetCallstackContext(CallstackContext& context, const Context* /*pContext*/)
-{
-	memset(&context, 0, sizeof(context));
-}
-
-EATHREADLIB_API size_t GetModuleFromAddress(const void* /*pAddress*/, char* /*pModuleFileName*/, size_t /*moduleNameCapacity*/)
-{
-	return 0;
-}
-
-EATHREADLIB_API ModuleHandle GetModuleHandleFromAddress(const void* /*pAddress*/)
-{
-	return (ModuleHandle)0;
-}
 
 
 #if EA_THREADS_AVAILABLE
@@ -114,4 +77,5 @@ EATHREADLIB_API void* GetStackLimit()
 } // namespace Thread
 } // namespace EA
 
-EA_RESTORE_VC_WARNING()
+EA_RESTORE_VC_WARNING();
+

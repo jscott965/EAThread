@@ -4,6 +4,7 @@
 
 #include "TestThread.h"
 #include <EATest/EATest.h>
+#include <EAStdC/EABitTricks.h>
 #include <EAStdC/EAStopwatch.h>
 #include <EAStdC/EASprintf.h>
 #include <EAStdC/EAString.h>
@@ -45,10 +46,6 @@ static intptr_t TestFunction1(void*)
 
 static intptr_t TestFunction3(void*)
 {
-	// This following code should produce NULL pointer access violation exception
-	// EA::UnitTest::ReportVerbosity(1, "Throw NULL pointer Exception.\n");
-	// char* pTest = NULL;
-	// *pTest = 1;
 	return 0;
 }
 
@@ -91,42 +88,81 @@ static intptr_t TestFunction7(void*)
 }
 
 
-static intptr_t TestFunction8(void*)
-{
-	while(sShouldGo == 0)
-		ThreadSleep(10);
-
-	return 0;
-}
-
-static intptr_t TestFunction9(void* arg)
+static intptr_t TestFunction_GetThreadProcessor(void*)
 {
 	return (intptr_t)GetThreadProcessor();
 }
 
-static intptr_t TestFunction10(void* arg)
+static int findSetBitIndex(int requestedIndex, uint64_t availableAffinityMask)
 {
-	ThreadSleep(10);
-	return TestFunction9(arg);
+	int correctedIndex = -1;
+	int64_t mask = 1;
+	do
+	{
+		if ((availableAffinityMask & mask) != 0)
+			--requestedIndex;
+
+		++correctedIndex;
+		mask <<= 1;
+	} while (requestedIndex >= 0);
+
+	return correctedIndex;
 }
 
-static intptr_t TestFunction12(void* arg)
-{    
-	ThreadSleep(10);    
-	return TestFunction9(arg);
+static int calculateAvailableProcessorIndex(int index)
+{
+	using namespace EA::Thread;
+	const int64_t affinityMask = GetAvailableCpuAffinityMask();
+	const int availableCpuCount = EA::StdC::CountBits64(affinityMask);
+	const int properIndex = findSetBitIndex(index % availableCpuCount, affinityMask);
+	return properIndex;
 }
 
-static intptr_t TestFunction11(void* arg)
+static intptr_t TestFunction_SetAffinityAndWait(void* arg)
 {
-	int requestedCore = *(static_cast<int*>(arg));
-	int coreIndex = (requestedCore % EA::Thread::GetProcessorCount());
+	const int requestedCore = *(static_cast<int*>(arg));
+	const int coreIndex = calculateAvailableProcessorIndex(requestedCore);
+	const ThreadAffinityMask affinityMask = UINT64_C(1) << coreIndex; 
 
-	SetThreadAffinityMask(UINT64_C(1) << coreIndex);  // set the highest processor available.
+	SetThreadAffinityMask(affinityMask);  
 
-	for (int retryCount = 100; retryCount && (GetThreadProcessor() != coreIndex); retryCount--)
+	while (GetThreadProcessor() != coreIndex)
+	{
+		SetThreadAffinityMask(affinityMask);  
+		ThreadSleep(0);
+	}
+
+	return (intptr_t)coreIndex;
+}
+
+static intptr_t TestFunction_SetThreadProcessorAndWait(void* arg)
+{
+	const int requestedCore = *(static_cast<int*>(arg));
+	const int coreIndex = calculateAvailableProcessorIndex(requestedCore);
+
+	SetThreadProcessor(coreIndex);  
+
+	while (GetThreadProcessor() != coreIndex)
+	{
+		SetThreadProcessor(coreIndex);  
+		ThreadSleep(0);
+	}
+
+	return (intptr_t)coreIndex;
+}
+
+static intptr_t TestFunction_WaitForThreadMigration(void* arg)
+{
+	sThreadCount++;
+
+	const int requestedCore = *(static_cast<int*>(arg));
+
+	while (GetThreadProcessor() != requestedCore)
 		ThreadSleep(1);
 
-	return (intptr_t)GetThreadProcessor();
+	sThreadCount--;
+
+	return (intptr_t)requestedCore;
 }
 
 static intptr_t TestFunction13(void* arg)
@@ -178,10 +214,6 @@ class TestRunnable3 : public IRunnable
 {
 	intptr_t Run(void*)
 	{
-		// This following code should produce NULL pointer access violation exception
-		// EA::UnitTest::ReportVerbosity(1, "Throw NULL pointer Exception.\n");
-		// char* pTest = NULL;
-		// *pTest = 1;
 		ThreadSleep(500);
 		return 0;
 	}
@@ -189,10 +221,10 @@ class TestRunnable3 : public IRunnable
 
 class TestRunnable4 : public IRunnable
 {
-	intptr_t Run(void*)
+	intptr_t Run(void* args)
 	{
 		// IRunnable object that returns the thread id that executed on.
-		return TestFunction9(NULL); 
+		return TestFunction_WaitForThreadMigration(args);
 	}
 } gTestRunnable4;
 
@@ -200,85 +232,106 @@ class TestRunnable4 : public IRunnable
 int TestThreadAffinityMask()
 {
 	int nErrorCount = 0;
+	const int TIMEOUT = 30000;
 	const int MAX_ITERATIONS = 16;
-	const int nAvailableProcessors = EA::Thread::GetProcessorCount();
+	const int nAvailableProcessors = EA::StdC::CountBits64(GetAvailableCpuAffinityMask());
 
-	auto VERIFY_AFFINITY_RESULT = [&](intptr_t in_result, int count)
+	auto VERIFY_AFFINITY_RESULT = [&](const char* name, intptr_t in_result, int count)
 	{
-#if EATHREAD_THREAD_AFFINITY_MASK_SUPPORTED
-		auto result = static_cast<int>(in_result);
-		EATEST_VERIFY_F(result == (count % nAvailableProcessors),
-						"Thread failure: SetAffinityMask not working properly. Thread ran on: %d/%d <=> Expected: %d\n",
-						result, nAvailableProcessors, (count % nAvailableProcessors));
-#endif
+	#if EATHREAD_THREAD_AFFINITY_MASK_SUPPORTED
+			auto result = static_cast<int>(in_result);
+			EATEST_VERIFY_F(
+				result == calculateAvailableProcessorIndex(count),
+				"Thread '%s' failure: SetAffinityMask not working properly. Thread ran on: %d/%d <=> Expected: %d\n", name,
+				result, nAvailableProcessors, calculateAvailableProcessorIndex(count));
+	#endif
 	};
 
 	int count = MAX_ITERATIONS;
 	while(--count)
 	{
-		// Test Thread Affinity Masks (thread parameters) 
-		Thread     thread;            
+		int properIndex = calculateAvailableProcessorIndex(count);
+		// Test Thread Affinity Masks (thread parameters)
+		Thread thread;
 		ThreadParameters params;
 
-		params.mnAffinityMask = INT64_C(1) << (count % nAvailableProcessors);
+		params.mnAffinityMask = INT64_C(1) << properIndex;
 		params.mnProcessor = kProcessorAny;
-		thread.Begin(TestFunction10, NULL, &params);
+		thread.Begin(TestFunction_GetThreadProcessor, NULL, &params);
 
 		intptr_t result = 0;
-		thread.WaitForEnd(GetThreadTime() + 30000, &result);
+		thread.WaitForEnd(GetThreadTime() + TIMEOUT, &result);
 
-		VERIFY_AFFINITY_RESULT(result, count);
+		VERIFY_AFFINITY_RESULT("Parameters", result, properIndex);
 	}
 
 	count = MAX_ITERATIONS;    
 	while(--count)
 	{
+		int startIndex = calculateAvailableProcessorIndex(count + 1); // We explicitly want it to start on another core.
+		int properIndex = calculateAvailableProcessorIndex(count);
+
+		sThreadCount = 0;
+
 		// Test Thread Affinity Masks (thread object)
 		ThreadParameters params;
-		params.mnProcessor = kProcessorAny;
+		params.mnProcessor = startIndex;
 
-		Thread     thread;            
-		thread.Begin(TestFunction12, NULL, &params);  // sleeps then grabs the current thread id. 
-		thread.SetAffinityMask(INT64_C(1) << (count % nAvailableProcessors));
+		Thread thread;
+		thread.Begin(TestFunction_WaitForThreadMigration, &properIndex, &params);  // sleeps then grabs the current thread id. 
 
-		intptr_t   result = 0;
-		thread.WaitForEnd(GetThreadTime() + 30000, &result);
+		#ifdef EA_PLATFORM_UNIX
+			// spin while we wait for the thread to startup 
+			while (sThreadCount == 0)
+				ThreadSleep(1);
+		#endif
 
-		VERIFY_AFFINITY_RESULT(result, count);
+		// after thread has started, set the requested affinity
+		thread.SetAffinityMask(INT64_C(1) << properIndex);
+
+		// wait for the thread to end
+		intptr_t result = 0;
+		thread.WaitForEnd(GetThreadTime() + TIMEOUT, &result);
+
+		VERIFY_AFFINITY_RESULT("Object", result, properIndex);
 	}    
 	
 	count = MAX_ITERATIONS;
 	while(--count)
 	{
+		int properIndex = calculateAvailableProcessorIndex(count);
+
 		// Test Thread Affinity Masks (global functions)       
 		ThreadParameters params;
 		params.mnProcessor = kProcessorAny;
 
-		Thread     thread;            
-		thread.Begin(TestFunction11, &count, &params);  
+		Thread thread;
+		thread.Begin(TestFunction_SetAffinityAndWait, &properIndex, &params);
 
-		intptr_t   result = 0;
-		thread.WaitForEnd(GetThreadTime() + 30000, &result);
+		intptr_t result = 0;
+		thread.WaitForEnd(GetThreadTime() + TIMEOUT, &result);
 
-		VERIFY_AFFINITY_RESULT(result, count);
+		VERIFY_AFFINITY_RESULT("Global Function", result, properIndex);
 	}
 
 	count = MAX_ITERATIONS;    
 	while(--count)
 	{
+		int properIndex = calculateAvailableProcessorIndex(count);
+
 		// Test Thread Affinity Masks (thread parameters) - For IRunnable variant of the Thread::Begin function
 		ThreadParameters params;
 		params.mnProcessor = kProcessorAny;
-		params.mnAffinityMask = INT64_C(1) << (count % nAvailableProcessors);
+		params.mnAffinityMask = INT64_C(1) << properIndex;
 		params.mnProcessor = kProcessorAny;
 
-		Thread     thread;            
-		thread.Begin(&gTestRunnable4, NULL, &params);  // sleeps then grabs the current thread id. 
+		Thread thread;
+		thread.Begin(&gTestRunnable4, &properIndex, &params);  // sleeps then grabs the current thread id.
 
-		intptr_t   result = 0;
-		thread.WaitForEnd(GetThreadTime() + 30000, &result);
+		intptr_t result = 0;
+		thread.WaitForEnd(GetThreadTime() + TIMEOUT, &result);
 
-		VERIFY_AFFINITY_RESULT(result, count);
+		VERIFY_AFFINITY_RESULT("IRunnable Thread Parameters", result, properIndex);
 	}    
 
 	return nErrorCount;
@@ -552,6 +605,95 @@ int TestThreadDynamicData()
 
 int TestSetThreadProcessor()
 {
+	int nErrorCount = 0;
+
+	const int TIMEOUT = 30000;
+
+	auto VERIFY_THREAD_PROCESSOR_RESULT = [&](const char* name, intptr_t in_result, int count)
+	{
+	#if EATHREAD_THREAD_AFFINITY_MASK_SUPPORTED
+			const int nAvailableProcessors = EA::StdC::CountBits64(EA::Thread::GetAvailableCpuAffinityMask());
+			auto result = static_cast<int>(in_result);
+			EATEST_VERIFY_F(
+				result == calculateAvailableProcessorIndex(count),
+				"Thread '%s' failure: SetAffinityMask not working properly. Thread ran on: %d/%d <=> Expected: %d\n", name,
+				result, nAvailableProcessors, calculateAvailableProcessorIndex(count));
+	#endif
+	};
+
+	int count = EA::StdC::CountBits64(EA::Thread::GetAvailableCpuAffinityMask());
+	while(--count)
+	{
+		int correctIndex = calculateAvailableProcessorIndex(count);
+		Thread thread;
+		thread.Begin(TestFunction_SetThreadProcessorAndWait, &correctIndex, nullptr);  // sleeps then grabs the current thread id. 
+
+		// wait for the thread to end
+		intptr_t result = 0;
+		thread.WaitForEnd(GetThreadTime() + TIMEOUT, &result);
+
+		VERIFY_THREAD_PROCESSOR_RESULT("SetThreadProcessor", result, correctIndex);
+	}    
+
+	return nErrorCount;
+}
+
+int TestSetProcessor()
+{
+	int nErrorCount = 0;
+
+	const int TIMEOUT = 30000;
+	const int nAvailableProcessors = EA::StdC::CountBits64(EA::Thread::GetAvailableCpuAffinityMask());
+	const int MAX_ITERATIONS = 16;
+
+	auto VERIFY_SET_PROCESSOR_RESULT = [&](const char* name, intptr_t in_result, int count)
+	{
+	#if EATHREAD_THREAD_AFFINITY_MASK_SUPPORTED
+			auto result = static_cast<int>(in_result);
+			EATEST_VERIFY_F(
+				result == calculateAvailableProcessorIndex(count),
+				"Thread '%s' failure: SetProcessor not working properly. Thread ran on: %d/%d <=> Expected: %d\n", name,
+				result, nAvailableProcessors, calculateAvailableProcessorIndex(count));
+	#endif
+	};
+
+
+	int count = MAX_ITERATIONS;    
+	while(--count)
+	{
+		int startIndex = calculateAvailableProcessorIndex(count + 1); // We explicitly want it to start on another core.
+		int properIndex = calculateAvailableProcessorIndex(count);
+
+		sThreadCount = 0;
+
+		// Test Thread Affinity Masks (thread object)
+		ThreadParameters params;
+		params.mnProcessor = startIndex;
+		
+		Thread thread;
+		thread.Begin(TestFunction_WaitForThreadMigration, &properIndex, &params);  // sleeps then grabs the current thread id. 
+
+		#ifdef EA_PLATFORM_UNIX
+			// spin while we wait for the thread to startup 
+			while (sThreadCount == 0)
+				ThreadSleep(1);
+		#endif
+
+		// after thread has started, set the requested affinity
+		thread.SetProcessor(properIndex);
+
+		// wait for the thread to end
+		intptr_t result = 0;
+		thread.WaitForEnd(GetThreadTime() + TIMEOUT, &result);
+
+		VERIFY_SET_PROCESSOR_RESULT("SetProcessor", result, properIndex);
+	}    
+
+	return nErrorCount;
+}
+
+int TestSetThreadProcessorByThreadParams()
+{
 	// Exercise EA::Thread::GetThreadId, EA::Thread::GetSysThreadId, EAThreadGetUniqueId, SetThreadProcessor, GetThreadProcessor.
 
 	// Create and start N threads paused.
@@ -593,14 +735,15 @@ int TestSetThreadProcessor()
 	#else
 	  const int kThreadCount = 16;
 	#endif
+
 	IdTestThread                thread[kThreadCount];
 	ThreadParameters            threadParams;
 	EA::UnitTest::RandGenT<int> random(EA::UnitTest::GetRandSeed());
-	const int                   processorCount = EA::Thread::GetProcessorCount();
+	const int                   processorCount = EA::StdC::CountBits64(EA::Thread::GetAvailableCpuAffinityMask());
 
 	for(int i = 0; i < kThreadCount; i++)
 	{
-		threadParams.mnProcessor = random(processorCount);
+		threadParams.mnProcessor = calculateAvailableProcessorIndex(random(processorCount));
 		threadParams.mpName = "IdTest";
 		thread[i].mAssignedProcessorId = threadParams.mnProcessor;
 		thread[i].mThread.Begin(&thread[i], NULL, &threadParams);
@@ -615,6 +758,7 @@ int TestSetThreadProcessor()
 
 	for(int i = 0; i < kThreadCount; i++)
 		thread[i].mThread.WaitForEnd();
+
 	EAReadBarrier();
 
 	EA::Thread::ThreadUniqueId uniqueIdArray[kThreadCount];
@@ -644,12 +788,7 @@ int TestSetThreadProcessor()
 			EATEST_VERIFY(memcmp(&sysIdArray[j], &thread[i].mSysThreadId, sizeof(EA::Thread::SysThreadId)) != 0);
 		sysIdArray[i] = thread[i].mSysThreadId;
 
-		// The following will fail on some platforms, as they don't support assigning 
-		// thread affinity (e.g. PS3) or don't respect the assigned thread affinity (e.g. Windows). 
-		// To consider: make a define which identifies which platforms rigidly follow thread processor assignments.
-		// On Windows, EAThread doesn't use SetThreadAffinityMask but rather uses SetThreadIdealProcessor,
-		// which doesn't guarantee which processor the thread will run on and rather is a hint.
-		#if defined(EA_PLATFORM_CONSOLE) && defined(EA_PLATFORM_MICROSOFT) // To do: add platforms to this list appropriately.
+		#if defined(EA_PLATFORM_CONSOLE) && defined(EA_PLATFORM_MICROSOFT)
 			EATEST_VERIFY_F(thread[i].mProcessorId == thread[i].mAssignedProcessorId, 
 							 "    Error: Thread assigned to run on processor %d, found to be running on processor %d.", 
 							 thread[i].mAssignedProcessorId, thread[i].mProcessorId);
@@ -664,7 +803,7 @@ int TestThreadDisablePriorityBoost()
 {
 	int nErrorCount = 0;
 
-#if defined(EA_PLATFORM_WINDOWS) || defined(EA_PLATFORM_XBOXONE)
+#if defined(EA_PLATFORM_WINDOWS) || defined(EA_PLATFORM_XBOXONE) || defined(EA_PLATFORM_XBSX)
 	{
 		Thread thread;
 		ThreadParameters params;
@@ -818,7 +957,9 @@ int TestThreadThread()
 
 	sThreadTestTimeMS = (gTestLengthSeconds * 1000) / 2; // '/2' because this test doesn't need so much time.
 
+#if !defined(EA_PLATFORM_UNIX) && !defined(EA_PLATFORM_MOBILE)
 	nErrorCount += TestThreadAffinityMask();
+#endif
 	nErrorCount += TestThreadEnd();
 
 	{
@@ -865,7 +1006,7 @@ int TestThreadThread()
 		// It turns out that you can't really do such a thing as set lower priority with most Unix threading subsystems. 
 		// You can do so with Cygwin because it is just a pthreads API running on Windows OS/threading.
 		// C++11 thread libraries also provide no means to set or query thread priority.
-		#if (!defined(EA_PLATFORM_UNIX) || defined(EA_PLATFORM_CYGWIN)) && !EA_USE_CPP11_CONCURRENCY
+		#if (!defined(EA_PLATFORM_UNIX) || defined(__CYGWIN__)) && !EA_USE_CPP11_CONCURRENCY
 			int  nPriority1;
 			bool bResult;
 
@@ -896,7 +1037,6 @@ int TestThreadThread()
 		ThreadSleep(kTimeoutImmediate);
 		ThreadSleep(500);
 	}
-
 
 	#if defined(EA_PLATFORM_WINDOWS) && !EA_USE_CPP11_CONCURRENCY
 	{ // Try to reproduce Windows problem with Thread::GetStatus returning kStatusEnded when it should return kStatusRunning.
@@ -1025,7 +1165,7 @@ int TestThreadThread()
 		ThreadParameters threadParameters;
 		threadParameters.mpName = defaultName;
 		threadParameters.mnProcessor = EA::Thread::kProcessorAny;
-		threadParameters.mnAffinityMask = EA::Thread::kThreadAffinityMaskAny;
+		threadParameters.mnAffinityMask = EA::Thread::GetAvailableCpuAffinityMask();
 
 		static volatile std::atomic<bool> sbThreadStarted;
 		static volatile std::atomic<bool> sbThreadTestDone;
@@ -1134,7 +1274,6 @@ int TestThreadThread()
 		}
 	}
 
-
 	{
 		// Test the creation of many threads
 
@@ -1183,8 +1322,8 @@ int TestThreadThread()
 			Thread thread;
 			
 			// Get our thread going. It will sleep immediately for 2 seconds and then increment sShouldGo
-			ThreadId threadId = thread.Begin(TestFunction8);
-			EATEST_VERIFY_MSG(threadId != kThreadIdInvalid, "Thread failure: thread.Begin(TestFunction8) failed.\n");
+			ThreadId threadId = thread.Begin(TestFunction7);
+			EATEST_VERIFY_MSG(threadId != kThreadIdInvalid, "Thread failure: thread.Begin(TestFunction7) failed.\n");
 
 			// Now we exit our scope while our thread in theory still has a second before it completes
 		} // NOTE(rparolin): If your test hangs here, its most likely due to a semantic change in the thread object that is waiting for threads to complete.
@@ -1230,6 +1369,8 @@ int TestThreadThread()
 	nErrorCount += TestThreadDynamicData();
 	nErrorCount += TestThreadPriorities();
 	nErrorCount += TestSetThreadProcessor();
+	nErrorCount += TestSetProcessor();
+	nErrorCount += TestSetThreadProcessorByThreadParams();
 	nErrorCount += TestSetThreadProcessConstants();
 	nErrorCount += TestNullThreadNames();
 	nErrorCount += TestLambdaThreads();
@@ -1255,8 +1396,19 @@ int TestThreadThread()
 
 			// This test tends to be quite taxing on system resources, so cut it back for 
 			// certain platforms. To do: use EATest's platform speed metrics.
-			const int kThreadCount(48); // This needs to be greater than the eathread_thread.cpp kMaxThreadDynamicDataCount value.
+		ThreadParameters params;
+		const int kThreadCount(48); // This needs to be greater than the eathread_thread.cpp kMaxThreadDynamicDataCount value.
+		#ifdef EA_PLATFORM_NX
+			const int kTotalThreadsToRun(64);
+
+			const auto nAllCoresAffinityMask = ((INT64_C(1) << EA::Thread::GetProcessorCount()) - 1);
+			const auto nAllCoresButMainAffinityMask = nAllCoresAffinityMask & INT64_C(0XFFFFFFFFFFFFFE);
+
+			params.mnAffinityMask = nAllCoresButMainAffinityMask;
+			params.mnProcessor = kProcessorAny;
+		#else
 			const int kTotalThreadsToRun(500);
+		#endif
 
 			Thread    thread;
 			ThreadId  threadId;
@@ -1269,7 +1421,7 @@ int TestThreadThread()
 			// Create threads.
 			for(i = 0; i < kThreadCount; i++)
 			{
-				threadId = thread.Begin(TestFunction6, reinterpret_cast<void*>((uintptr_t)i));
+				threadId = thread.Begin(TestFunction6, reinterpret_cast<void*>((uintptr_t)i), &params);
 				EATEST_VERIFY(threadId != kThreadIdInvalid);
 			}
 
@@ -1285,7 +1437,7 @@ int TestThreadThread()
 			{
 				if(sThreadCount < kThreadCount)
 				{
-					threadId = thread.Begin(TestFunction6, reinterpret_cast<void*>((uintptr_t)i++));
+					threadId = thread.Begin(TestFunction6, reinterpret_cast<void*>((uintptr_t)i++), &params);
 
 					EATEST_VERIFY(threadId != kThreadIdInvalid);
 

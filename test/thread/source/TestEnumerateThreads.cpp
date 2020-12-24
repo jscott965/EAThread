@@ -75,10 +75,12 @@ int TestSimpleEnumerateThreads()
 		if(enumData[j].mpThreadDynamicData == NULL)
 			continue;
 
+	#if !defined(EA_PLATFORM_NX)  // mpStackBase is null because the necessary POSIX API (pthread_getattr_np) isn't implemented by Nintendo
 		if(strcmp(enumData[j].mpThreadDynamicData->mName, "external") != 0) // Disabled because we can't guarantee across all platforms that a stack base is available.  This will be fixed in a future release.
 		{
 			EATEST_VERIFY_MSG(enumData[j].mpThreadDynamicData->mpStackBase != NULL, "All thread meta data is expected to have the stack base address.");
 		}
+	#endif
 		enumData[j].Release(); 
 	}
 	

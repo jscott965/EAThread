@@ -11,7 +11,7 @@ EA_RESTORE_VC_WARNING()
 
 #if defined(EA_PLATFORM_SONY)
 	// Posix already defines a Condition (via condition variables).
-	#include "kettle/eathread_condition_kettle.cpp"
+	#include "sony/eathread_condition_sony.cpp"
 #elif (defined(EA_PLATFORM_UNIX) || EA_POSIX_THREADS_AVAILABLE) && EA_THREADS_AVAILABLE
 	// Posix already defines a Condition (via condition variables).
 	#include "unix/eathread_condition_unix.cpp"

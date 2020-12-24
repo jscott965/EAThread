@@ -1,11 +1,11 @@
-﻿///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 // Copyright (c) Electronic Arts Inc. All rights reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
-#include <EABase/eabase.h>
+#if defined(_MSC_VER)
+	#pragma warning(disable: 4985)  // 'ceil': attributes not present on previous declaration.1>    C:\Program Files (x86)\Microsoft Visual Studio 9.0\VC\INCLUDE\intrin.h(142) : see declaration of 'ceil'
+#endif
 
-
-EA_DISABLE_VC_WARNING(4985)  // 'ceil': attributes not present on previous declaration.1>    C:\Program Files (x86)\Microsoft Visual Studio 9.0\VC\INCLUDE\intrin.h(142) : see declaration of 'ceil'
 
 #include <eathread/internal/config.h>
 #include <eathread/eathread_rwmutex.h>
@@ -13,7 +13,10 @@ EA_DISABLE_VC_WARNING(4985)  // 'ceil': attributes not present on previous decla
 #include <new> // include new for placement new operator
 #include <string.h>
 
-EA_DISABLE_VC_WARNING(4996) // This function or variable may be unsafe / deprecated.
+#ifdef _MSC_VER
+	#pragma warning(disable : 4996) // This function or variable may be unsafe / deprecated.
+#endif
+
 
 	EARWMutexData::EARWMutexData()
 	  : mnReadWaiters(0), 
@@ -254,5 +257,7 @@ void EA::Thread::RWMutexFactory::DestructRWMutex(EA::Thread::RWMutex* pRWMutex)
 	pRWMutex->~RWMutex();
 }
 
-EA_RESTORE_VC_WARNING() // 4996
-EA_RESTORE_VC_WARNING() // 4985
+
+
+
+

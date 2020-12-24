@@ -26,14 +26,15 @@
 #include <stddef.h>
 
 
-#if defined(EA_DLL) && defined(EA_COMPILER_MSVC)
+#if defined(EA_DLL) && defined(_MSC_VER)
 	// Suppress warning about class 'EA::Thread::simple_list<T>' needs to have
 	// dll-interface to be used by clients of class which have a templated member.
 	// 
 	// These templates cannot be instantiated outside of the DLL. If you try, a
 	// link error will result. This compiler warning is intended to notify users
 	// of this.
-	EA_DISABLE_VC_WARNING(4251)
+	#pragma warning(push)
+	#pragma warning(disable: 4251)
 #endif
 
 #if defined(EA_PRAGMA_ONCE_SUPPORTED)
@@ -281,9 +282,9 @@ namespace EA
 
 
 
-#if defined(EA_DLL) && defined(EA_COMPILER_MSVC)
+#if defined(EA_DLL) && defined(_MSC_VER)
 	// re-enable warning 4251 (it's a level-1 warning and should not be suppressed globally)
-	EA_RESTORE_VC_WARNING()
+	#pragma warning(pop)
 #endif
 
 

@@ -2,32 +2,72 @@
 // Copyright (c) Electronic Arts Inc. All rights reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
+/////////////////////////////////////////////////////////////////////////////
+// eathread_atomic.h
+//
+// Defines functionality for thread-safe primitive operations.
+// 
+// EAThread atomics do NOT imply the use of read/write barriers.  This is 
+// partly due to historical reasons and partly due to EAThread's internal 
+// code being optimized for not using barriers.
+//
+// In future, we are considering migrating the atomics interface which  
+// defaults atomics to use full read/write barriers while allowing users
+// to opt-out of full barrier usage.  The new C++11 interface already provides
+// similar interfaces.
+//
+// http://en.cppreference.com/w/cpp/atomic/memory_order
+//
+// Created by Rob Parolin
+/////////////////////////////////////////////////////////////////////////////
+
+#ifndef EATHREAD_INTERNAL_EATHREAD_ATOMIC_H
+#define EATHREAD_INTERNAL_EATHREAD_ATOMIC_H
+
+#include <EABase/eabase.h>
+#include <eathread/internal/config.h>
+#include <eathread/internal/eathread_atomic_standalone.h>
+#include <atomic>
+
 #if defined(EA_PRAGMA_ONCE_SUPPORTED)
 	#pragma once // Some compilers (e.g. VC++) benefit significantly from using this. We've measured 3-4% build speed improvements in apps as a result.
 #endif
 
-#ifndef EATHREAD_ATOMIC_CPP11_H
-#define EATHREAD_ATOMIC_CPP11_H
-
-EA_DISABLE_VC_WARNING(4265 4365 4836 4571 4625 4626 4628 4193 4127 4548 4574 4731)
-#include <atomic>
-EA_RESTORE_VC_WARNING()
+#define EA_THREAD_ATOMIC_IMPLEMENTED
 
 namespace EA
 {
 	namespace Thread
 	{
-		#define EA_THREAD_ATOMIC_IMPLEMENTED
-
-		/// Non-member atomic functions
-		/// These act the same as the class functions below.
-		/// The T return values are the new value, except for the AtomicSwap function which returns the swapped out value.
+		/// class AtomicInt
 		///
-		/// todo: Implement me when we have a platform to test this on.  C++11 atomics are disabled on all platforms. 
+		/// Implements thread-safe access to an integer and primary operations on that integer.
+		/// AtomicIntegers are commonly used as lightweight flags and signals between threads
+		/// or as the synchronization object for spinlocks. Those familiar with the Win32 API
+		/// will find that AtomicInt32 is essentially a platform independent interface to 
+		/// the Win32 InterlockedXXX family of functions. Those familiar with Linux may 
+		/// find that AtomicInt32 is essentially a platform independent interface to atomic_t 
+		/// functionality.
 		///
-
+		/// Note that the reference implementation defined here is itself not thread-safe.
+		/// A thread-safe version requires platform-specific code.
+		///
+		/// Example usage
+		///     AtomicInt32 i = 0;
+		///
+		///     ++i;
+		///     i--;
+		///     i += 7;
+		///     i -= 3;
+		///     i = 2;
+		///     
+		///     int x = i.GetValue();
+		///     i.Increment();
+		///     bool oldValueWas6 = i.SetValueConditional(3, 6);
+		///     i.Add(4);
+		///
 		template <class T>
-		class EATHREADLIB_API AtomicInt
+		class AtomicInt
 		{
 		public:
 			typedef AtomicInt<T> ThisType;
@@ -36,173 +76,56 @@ namespace EA
 			/// AtomicInt
 			/// Empty constructor. Intentionally leaves mValue in an unspecified state.
 			/// This is done so that an AtomicInt acts like a standard built-in integer.
-			AtomicInt() {}
+			AtomicInt()
+				{}
 
-			/// AtomicInt
-			/// Constructs with an intial value. 
-			AtomicInt(ValueType n) : mValue(n) {}
+			AtomicInt(ValueType n) 
+				{ SetValue(n); }
 
-			/// AtomicInt
-			/// Copy ctor. Uses GetValue to read the value, and thus is synchronized. 
-			AtomicInt(const ThisType& x) : mValue(x.GetValue()) {}
+			AtomicInt(const ThisType& x) 
+				{ SetValue(x.GetValue()); }
 
-			/// AtomicInt
-			/// Assignment operator. Uses GetValue to read the value, and thus is synchronized. 
 			AtomicInt& operator=(const ThisType& x)
-			{ mValue = x.GetValue(); return *this; }
+				{ SetValue(x.GetValue()); return *this; }
 
-			/// GetValue
-			/// Safely gets the current value. A platform-specific version of 
-			/// this might need to do something more than just read the value.
-			ValueType GetValue() const volatile { return mValue; }
+			ValueType GetValue() const 
+				{ return mValue.load(); }
 
-			/// GetValueRaw
-			/// "Unsafely" gets the current value. This is useful for algorithms 
-			/// that want to poll the value in a high performance way before 
-			/// reading or setting the value in a more costly thread-safe way. 
-			/// You should not use this function when attempting to do thread-safe
-			/// atomic operations.
-			ValueType GetValueRaw() const { return mValue; }
+			ValueType GetValueRaw() const
+				{ return mValue; }
 
-			/// SetValue
-			/// Safely sets a new value. Returns the old value. Note that due to 
-			/// expected multithreaded accesses, a call to GetValue after SetValue
-			/// might return a different value then what was set with SetValue.
-			/// This of course depends on your situation.
-			ValueType SetValue(ValueType n) { return mValue.exchange(n); }
+			ValueType SetValue(ValueType n)
+				{ return mValue.exchange(n); }
 
-			/// SetValueConditional
-			/// Safely the value to a new value if the original value is equal to 
-			/// a condition value. Returns true if the condition was met and the 
-			/// assignment occurred. The comparison and value setting are done as
-			/// an atomic operation and thus another thread cannot intervene between
-			/// the two as would be the case with simple C code.
-			bool SetValueConditional(ValueType n, ValueType condition) 
-			{ 
-				return mValue.compare_exchange_strong(condition, n); 
-			}
+			bool SetValueConditional(ValueType n, ValueType condition)
+				{ return mValue.compare_exchange_strong(condition, n); }
 
-			/// Increment
-			/// Safely increments the value. Returns the new value.
-			/// This function acts the same as the C++ pre-increment operator.
-			ValueType Increment() { return ++mValue; }
+			ValueType Increment()
+				{ return mValue.operator++(); }
 
+			ValueType Decrement()
+				{ return mValue.operator--(); }
 
-			/// Decrement
-			/// Safely decrements the value. Returns the new value.
-			/// This function acts the same as the C++ pre-decrement operator.
-			ValueType Decrement() { return --mValue; }
+			ValueType Add(ValueType n)
+				{ return mValue.fetch_add(n) + n; }
 
+			// operators
+			inline            operator const ValueType() const { return GetValue(); }
+			inline ValueType  operator =(ValueType n)          { return mValue.operator=(n); }
+			inline ValueType  operator+=(ValueType n)          { return mValue.operator+=(n); }
+			inline ValueType  operator-=(ValueType n)          { return mValue.operator-=(n); }
+			inline ValueType  operator++()                     { return mValue.operator++(); }
+			inline ValueType  operator++(int)                  { return mValue.operator++(0); }
+			inline ValueType  operator--()                     { return mValue.operator--(); }
+			inline ValueType  operator--(int)                  { return mValue.operator--(0); }
 
-			/// Add
-			/// Safely adds a value, which can be negative. Returns the new value.
-			/// You can implement subtraction with this function by using a negative argument.
-			ValueType Add(ValueType n) { return (mValue += n); }
-
-
-			/// operators
-			/// These allow an AtomicInt object to safely act like a built-in type.
-			///
-			/// Note: The operators for AtomicInt behaves differently than standard
-			///         C++ operators in that it will always return a ValueType instead
-			///         of a reference.
-			///
-			/// cast operator
-			/// Returns the AtomicInt value as an integral type. This allows the 
-			/// AtomicInt to behave like a standard built-in integer type.
-			operator const ValueType() const { return mValue; }
-
-			/// operator =
-			/// Assigns a new value and returns the value after the operation.
-			///
-			ValueType operator=(ValueType n) { SetValue(n); return n; }
-
-			/// pre-increment operator+=
-			/// Adds a value to the AtomicInt and returns the value after the operation.
-			///
-			/// This function doesn't obey the C++ standard in that it does not return 
-			/// a reference, but rather the value of the AtomicInt after the  
-			/// operation is complete. It must be noted that this design is motivated by
-			/// the fact that it is unsafe to rely on the returned value being equal to 
-			/// the previous value + n, as another thread might have modified the AtomicInt 
-			/// immediately after the subtraction operation.  So rather than returning the
-			/// reference of AtomicInt, the function returns a copy of the AtomicInt value
-			/// used in the function.
-			ValueType operator+=(ValueType n)  { mValue += n; return mValue; }
-
-			/// pre-increment operator-=
-			/// Subtracts a value to the AtomicInt and returns the value after the operation.
-			///
-			/// This function doesn't obey the C++ standard in that it does not return 
-			//  a reference, but rather the value of the AtomicInt after the  
-			/// operation is complete. It must be noted that this design is motivated by
-			/// the fact that it is unsafe to rely on the returned value being equal to 
-			/// the previous value - n, as another thread might have modified the AtomicInt 
-			/// immediately after the subtraction operation.  So rather than returning the
-			/// reference of AtomicInt, the function returns a copy of the AtomicInt value
-			/// used in the function.
-			ValueType operator-=(ValueType n) { mValue -= n; return mValue; }
-
-			/// pre-increment operator++
-			/// Increments the AtomicInt. 
-			///
-			/// This function doesn't obey the C++ standard in that it does not return 
-			//  a reference, but rather the value of the AtomicInt after the  
-			/// operation is complete. It must be noted that this design is motivated by
-			/// the fact that it is unsafe to rely on the returned value being equal to 
-			/// the previous value + 1, as another thread might have modified the AtomicInt 
-			/// immediately after the subtraction operation.  So rather than returning the
-			/// reference of AtomicInt, the function returns a copy of the AtomicInt value
-			/// used in the function.
-			ValueType operator++() { return ++mValue; }
-
-			/// post-increment operator++
-			/// Increments the AtomicInt and returns the value of the AtomicInt before
-			/// the increment operation. 
-			///
-			/// This function doesn't obey the C++ standard in that it does not return 
-			//  a reference, but rather the value of the AtomicInt after the  
-			/// operation is complete. It must be noted that this design is motivated by
-			/// the fact that it is unsafe to rely on the returned value being equal to 
-			/// the previous value, as another thread might have modified the AtomicInt 
-			/// immediately after the subtraction operation.  So rather than returning the
-			/// reference of AtomicInt, the function returns a copy of the AtomicInt value
-			/// used in the function.
-			ValueType operator++(int) { return mValue++; }
-
-			/// pre-increment operator--
-			/// Decrements the AtomicInt.
-			///
-			/// This function doesn't obey the C++ standard in that it does not return 
-			//  a reference, but rather the value of the AtomicInt after the  
-			/// operation is complete. It must be noted that this design is motivated by
-			/// the fact that it is unsafe to rely on the returned value being equal to 
-			/// the previous value - 1, as another thread might have modified the AtomicInt 
-			/// immediately after the subtraction operation.  So rather than returning the
-			/// reference of AtomicInt, the function returns a copy of the AtomicInt value
-			/// used in the function.
-			ValueType operator--() { return --mValue; }
-
-			/// post-increment operator--
-			/// Increments the AtomicInt and returns the value of the AtomicInt before
-			/// the increment operation. 
-			///
-			/// This function doesn't obey the C++ standard in that it does not return 
-			//  a reference, but rather the value of the AtomicInt after the  
-			/// operation is complete. It must be noted that this design is motivated by
-			/// the fact that it is unsafe to rely on the returned value being equal to 
-			/// the previous value, as another thread might have modified the AtomicInt 
-			/// immediately after the subtraction operation.  So rather than returning the
-			/// reference of AtomicInt, the function returns a copy of the AtomicInt value
-			/// used in the function.
-			ValueType operator--(int) { return mValue--;}
-
-		private:
-			std::atomic<T> mValue;
+		protected:
+			std::atomic<ValueType> mValue;
 		};
 
-	}
-}
+	} // namespace Thread
+} // namespace EA
 
 
-#endif // EATHREAD_ATOMIC_CPP11_H
+#endif // EATHREAD_INTERNAL_EATHREAD_ATOMIC_H
+

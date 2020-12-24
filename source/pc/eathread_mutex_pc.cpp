@@ -115,7 +115,8 @@
 
 
 
-	EA_DISABLE_VC_WARNING(4706) // disable warning about assignment within a conditional expression
+	#pragma warning(push)
+	#pragma warning(disable: 4706) // disable warning about assignment within a conditional expression
 
 	int EA::Thread::Mutex::Lock(const ThreadTime& timeoutAbsolute)
 	{
@@ -161,7 +162,7 @@
 		return ++mMutexData.mnLockCount; // This is safe to do because we have the lock.
 	}
 
-	EA_RESTORE_VC_WARNING()
+	#pragma warning(pop)
 
 
 

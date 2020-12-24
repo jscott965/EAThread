@@ -10,7 +10,7 @@
 #include "eathread/eathread_thread.h"
 #include "eathread/internal/eathread_global.h"
 
-#if defined(EA_COMPILER_MSVC) && EA_COMPILER_VERSION >= 1900 // VS2015+
+#if EA_COMPILER_VERSION >= 1900 // VS2015+
 // required for windows.h that has mismatch that is included in this file
 	EA_DISABLE_VC_WARNING(5031 5032)// #pragma warning(pop): likely mismatch, popping warning state pushed in different file / detected #pragma warning(push) with no corresponding
 #endif
@@ -30,7 +30,7 @@ EA_DISABLE_VC_WARNING(6312 6322)
 		#include <Windows.h>
 		EA_RESTORE_ALL_VC_WARNINGS()
 
-		#if defined(EA_COMPILER_MSVC)
+		#if defined(_MSC_VER)
 			struct ThreadNameInfo{
 				DWORD  dwType;
 				LPCSTR lpName;
@@ -42,7 +42,11 @@ EA_DISABLE_VC_WARNING(6312 6322)
 		#endif
 
 
-	#ifdef EA_COMPILER_MSVC
+	#ifdef _MSC_VER
+		#ifndef EATHREAD_INIT_SEG_DEFINED
+			#define EATHREAD_INIT_SEG_DEFINED 
+		#endif
+
 		// We are changing the initalization ordering here because in bulkbuild tool builds the initialization 
 		// order of globals changes and causes a crash when we attempt to lock the Mutex guarding access
 		// of the EAThreadDynamicData objects.  The code attempts to lock a mutex that has been destructed
@@ -51,11 +55,9 @@ EA_DISABLE_VC_WARNING(6312 6322)
 		//
 		#ifndef EATHREAD_INIT_SEG_DEFINED
 			#define EATHREAD_INIT_SEG_DEFINED 
-			// warning C4075: initializers put in unrecognized initialization area
-			//warning C4073: initializers put in library initialization area
-			EA_DISABLE_VC_WARNING(4075 4073)
+			#pragma warning(disable: 4075) // warning C4075: initializers put in unrecognized initialization area
+			#pragma warning(disable: 4073) //warning C4073: initializers put in library initialization area
 			#pragma init_seg(lib)
-			#define WARNING_INIT_SEG_PUSHED
 		#endif
 	#endif
 
@@ -338,7 +340,7 @@ EA_DISABLE_VC_WARNING(6312 6322)
 			mThreadData.mpData->Release();
 	}
 
-  #if defined(EA_PLATFORM_XBOXONE)
+  #if defined(EA_PLATFORM_XBOXONE) || defined(EA_PLATFORM_XBSX)
 	static DWORD WINAPI RunnableFunctionInternal(void* pContext)
   #else
 	static unsigned int __stdcall RunnableFunctionInternal(void* pContext)
@@ -439,7 +441,7 @@ EA_DISABLE_VC_WARNING(6312 6322)
 
 		const unsigned nStackSize = pTP ? (unsigned)pTP->mnStackSize : 0;
 
-		#if defined(EA_PLATFORM_XBOXONE)
+		#if defined(EA_PLATFORM_XBOXONE) || defined(EA_PLATFORM_XBSX)
 			// Capilano no longer supports _beginthreadex. Using CreateThread instead may cause issues when using the MS CRT 
 			// according to MSDN (memory leaks or possibly crashes) as it does not initialize the CRT. This a reasonable
 			// workaround while we wait for clarification from MS on what the recommended threading APIs are for Capilano.
@@ -459,7 +461,7 @@ EA_DISABLE_VC_WARNING(6312 6322)
 			if(pTP && (pTP->mnPriority != kThreadPriorityDefault))
 				SetPriority(pTP->mnPriority);
 
-			#if defined(EA_PLATFORM_WINDOWS) || defined(EA_PLATFORM_XBOXONE)
+			#if defined(EA_PLATFORM_WINDOWS) || defined(EA_PLATFORM_XBOXONE) || defined(EA_PLATFORM_XBSX)
 			if (pTP)
 			{
 				auto result = SetThreadPriorityBoost(pData->mhThread, pTP->mbDisablePriorityBoost);
@@ -489,7 +491,7 @@ EA_DISABLE_VC_WARNING(6312 6322)
 		return (ThreadId)kThreadIdInvalid;
 	}
 
-  #if defined(EA_PLATFORM_XBOXONE)
+  #if defined(EA_PLATFORM_XBOXONE) || defined(EA_PLATFORM_XBSX)
 	static DWORD WINAPI RunnableObjectInternal(void* pContext)
   #else
 	static unsigned int __stdcall RunnableObjectInternal(void* pContext)
@@ -550,7 +552,7 @@ EA_DISABLE_VC_WARNING(6312 6322)
 		pData->mnThreadAffinityMask = pTP ? pTP->mnAffinityMask : kThreadAffinityMaskAny;
 		const unsigned nStackSize     = pTP ? (unsigned)pTP->mnStackSize : 0;
 
-		#if defined(EA_PLATFORM_XBOXONE)
+		#if defined(EA_PLATFORM_XBOXONE) || defined(EA_PLATFORM_XBSX)
 			// Capilano no longer supports _beginthreadex. Using CreateThread instead may cause issues when using the MS CRT 
 			// according to MSDN (memory leaks or possibly crashes) as it does not initialize the CRT. This a reasonable
 			// workaround while we wait for clarification from MS on what the recommended threading APIs are for Capilano.
@@ -571,7 +573,7 @@ EA_DISABLE_VC_WARNING(6312 6322)
 			if(pTP && (pTP->mnPriority != kThreadPriorityDefault))
 				SetPriority(pTP->mnPriority);
 
-			#if defined(EA_PLATFORM_WINDOWS) || defined(EA_PLATFORM_XBOXONE)
+			#if defined(EA_PLATFORM_WINDOWS) || defined(EA_PLATFORM_XBOXONE) || defined(EA_PLATFORM_XBSX)
 			if (pTP)
 			{
 				auto result = SetThreadPriorityBoost(pData->mhThread, pTP->mbDisablePriorityBoost);
@@ -730,7 +732,7 @@ EA_DISABLE_VC_WARNING(6312 6322)
 
 			// Windows process running in NORMAL_PRIORITY_CLASS is picky about the priority passed in.
 			// So we need to set the priority to the next priority supported
-			#if defined(EA_PLATFORM_WINDOWS) || defined(EA_PLATFORM_XBOXONE)
+			#if defined(EA_PLATFORM_WINDOWS) || defined(EA_PLATFORM_XBOXONE) || defined(EA_PLATFORM_XBSX)
 				while(!result)
 				{
 					if(nNewPriority >= THREAD_PRIORITY_TIME_CRITICAL) 
@@ -755,7 +757,7 @@ EA_DISABLE_VC_WARNING(6312 6322)
 	{
 		if(mThreadData.mpData)
 		{
-			#if defined(EA_PLATFORM_XBOXONE)
+			#if defined(EA_PLATFORM_XBOXONE) || defined(EA_PLATFORM_XBSX)
 
 				static int nProcessorCount = GetProcessorCount();
 				if(nProcessor >= nProcessorCount)
@@ -818,15 +820,14 @@ EA_DISABLE_VC_WARNING(6312 6322)
 			EA::Thread::Internal::SetThreadName(mThreadData.mpData, pName);
 	}
 
-	#ifdef WARNING_INIT_SEG_PUSHED
-		#undef WARNING_INIT_SEG_PUSHED
-		EA_RESTORE_VC_WARNING() // 4073 4075
-	#endif
+
 #endif // EA_PLATFORM_MICROSOFT
 
-EA_RESTORE_VC_WARNING() // 6312 6322
+EA_RESTORE_VC_WARNING()
 
-#if defined(EA_COMPILER_MSVC) && EA_COMPILER_VERSION >= 1900 // VS2015+
-	EA_RESTORE_VC_WARNING() // 5031 5032
-	// #pragma warning(pop): likely mismatch, popping warning state pushed in different file / detected #pragma warning(push) with no corresponding
+#if EA_COMPILER_VERSION >= 1900 // VS2015+
+	EA_RESTORE_VC_WARNING()// #pragma warning(pop): likely mismatch, popping warning state pushed in different file / detected #pragma warning(push) with no corresponding
 #endif
+
+
+

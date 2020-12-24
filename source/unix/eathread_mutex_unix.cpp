@@ -12,9 +12,9 @@
 	#include <errno.h>
 	#include <string.h>
 	#ifdef EA_PLATFORM_WINDOWS
-	  EA_DISABLE_ALL_VC_WARNINGS()
+	  #pragma warning(push, 0)
 	  #include <Windows.h> // Presumably we are using pthreads-win32.
-	  EA_RESTORE_ALL_VC_WARNINGS()
+	  #pragma warning(pop)
 		#ifdef CreateMutex
 			#undef CreateMutex // Windows #defines CreateMutex to CreateMutexA or CreateMutexW.
 		#endif
@@ -89,6 +89,7 @@
 
 			pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
 
+			#if !defined( EA_PLATFORM_NX ) // NX defines PTHREAD_PROCESS_PRIVATE but doesn't implement pthread_mutexattr_setpshared because they are all private.
 				#if defined(PTHREAD_PROCESS_PRIVATE)    // Some pthread implementations don't recognize this.
 					#if defined(PTHREAD_PROCESS_SHARED)
 						if (pMutexParameters->mbIntraProcess)
@@ -99,6 +100,7 @@
 						pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_PRIVATE);
 					#endif
 				#endif
+			#endif
 
 			const int result = pthread_mutex_init(&mMutexData.mMutex, &attr);
 			pthread_mutexattr_destroy(&attr);
@@ -142,7 +144,7 @@
 		}
 		else
 		{
-			#if (defined(EA_PLATFORM_LINUX) || defined(EA_PLATFORM_WINDOWS)) && !defined(EA_PLATFORM_CYGWIN) && !defined(EA_PLATFORM_ANDROID)
+			#if (defined(EA_PLATFORM_LINUX) || defined(EA_PLATFORM_WINDOWS)) && !defined(__CYGWIN__) && !defined(EA_PLATFORM_ANDROID)
 				const timespec* pTimeSpec = &timeoutAbsolute;
 				result = pthread_mutex_timedlock(&mMutexData.mMutex, const_cast<timespec*>(pTimeSpec)); // Some pthread implementations use non-const timespec, so cast for them.
 

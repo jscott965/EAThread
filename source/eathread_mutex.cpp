@@ -17,7 +17,7 @@ EA_RESTORE_VC_WARNING()
 		#undef CreateMutex
 	#endif
 #elif defined(EA_PLATFORM_SONY)
-	#include "kettle/eathread_mutex_kettle.cpp"
+	#include "sony/eathread_mutex_sony.cpp"
 #elif defined(EA_PLATFORM_UNIX) || EA_POSIX_THREADS_AVAILABLE
 	#include "unix/eathread_mutex_unix.cpp"
 #elif defined(EA_PLATFORM_MICROSOFT)

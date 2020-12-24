@@ -43,13 +43,13 @@ EA_RESTORE_VC_WARNING()
 
 
 
-#elif (defined(EA_PLATFORM_UNIX) || EA_POSIX_THREADS_AVAILABLE) && !defined(CS_UNDEFINED_STRING)
+#elif (defined(EA_PLATFORM_UNIX) || EA_POSIX_THREADS_AVAILABLE) && !defined(EA_PLATFORM_NX)
 	#if defined(EA_PLATFORM_UNIX)
 		#include <unistd.h>
 	#elif defined(EA_PLATFORM_WINDOWS)
-		EA_DISABLE_ALL_VC_WARNINGS()
+		#pragma warning(push, 0)
 		#include <Windows.h>
-		EA_RESTORE_ALL_VC_WARNINGS()
+		#pragma warning(pop)
 	#endif
 
 	EA::Thread::ThreadLocalStorage::ThreadLocalStorage()
@@ -84,9 +84,9 @@ EA_RESTORE_VC_WARNING()
 
 
 #elif defined(EA_PLATFORM_MICROSOFT) && !defined(EA_PLATFORM_WINDOWS_PHONE) && !(defined(EA_PLATFORM_WINDOWS) && !EA_WINAPI_FAMILY_PARTITION(EA_WINAPI_PARTITION_DESKTOP)) 
-		EA_DISABLE_ALL_VC_WARNINGS()
+		#pragma warning(push, 0)
 		#include <Windows.h>
-		EA_RESTORE_ALL_VC_WARNINGS()
+		#pragma warning(pop)
 
 	EA::Thread::ThreadLocalStorage::ThreadLocalStorage()
 		: mTLSData(TlsAlloc())
@@ -115,7 +115,7 @@ EA_RESTORE_VC_WARNING()
 		return false;
 	}
 
-#elif (!EA_THREADS_AVAILABLE || defined(EA_PLATFORM_CONSOLE)) && !defined(CS_UNDEFINED_STRING)
+#elif (!EA_THREADS_AVAILABLE || defined(EA_PLATFORM_CONSOLE)) && !defined(EA_PLATFORM_NX)
 
 	#include <string.h>
 
@@ -348,3 +348,7 @@ void EA::Thread::ThreadLocalStorageFactory::DestructThreadLocalStorage(EA::Threa
 
 #undef OSEnableInterrupts   
 #undef OSDisableInterrupts
+
+
+
+

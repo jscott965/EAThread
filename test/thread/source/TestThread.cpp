@@ -95,7 +95,7 @@ static void EAThreadFailure(const char* pMessage, void* /*pContext*/)
 
 bool IsSuperUser()
 {
-#if defined(EA_PLATFORM_POSIX) && !defined(EA_PLATFORM_SONY) && !defined(CS_UNDEFINED_STRING)  // PS4 is a POSIX machine but doesn't implement 'getuid'.
+#if defined(EA_PLATFORM_POSIX) && !defined(EA_PLATFORM_SONY) && !defined(EA_PLATFORM_NX)  // PS4 is a POSIX machine but doesn't implement 'getuid'.
 	// http://pubs.opengroup.org/onlinepubs/009695399/functions/geteuid.html 
 	// http://pubs.opengroup.org/onlinepubs/009695399/functions/getuid.html
 	uid_t uid = getuid(), euid = geteuid();
@@ -173,7 +173,6 @@ int EAMain(int argc, char** argv)
 #ifndef EA_OPENSOURCE
 	EA::Thread::SetAllocator(EA::Allocator::ICoreAllocator::GetDefaultAllocator());
 #endif
-	EA::Thread::InitCallstack();
 
 	// Print ThreadId for this primary thread.
 	const ThreadId threadId = GetThreadId();
@@ -198,6 +197,17 @@ int EAMain(int argc, char** argv)
 	// Add the tests
 	TestApplication testSuite("EAThread Unit Tests", argc, argv);
 
+	#if defined(EA_PLATFORM_NX)
+		// We are enabling round-robin scheduling on the Nintendo NX by setting the main thread to the lowest thread
+		// priority.  The pthread interfaces inherits the main threads priority when creating new threads so this
+		// ensures all worker threads spawned in tests will be assigned equal time on cores.  This is a documented
+		// feature of the NX thread scheduler. The default behaviour of the scheduler is to not give up their core to
+		// threads of equal priority which causes live locks in our tests.
+		//
+		// Reference:
+		// https://developer.nintendo.com/html/online-docs/nx-en/g1kr9vj6-en/document.html?doc=Packages/SDK/NintendoSDK/Documents/Package/contents/Pages/Page_83955697.html
+		EA::Thread::SetThreadPriority(EA::Thread::kThreadPriorityMin);
+	#endif
 
 
 	testSuite.AddTest("Atomic",            TestThreadAtomic);
@@ -218,6 +228,7 @@ int EAMain(int argc, char** argv)
 	testSuite.AddTest("Sync",              TestThreadSync);
 	testSuite.AddTest("Thread",            TestThreadThread);
 	testSuite.AddTest("ThreadPool",        TestThreadThreadPool);
+	testSuite.AddTest("TestCpuAvailableAffinityMask", TestCpuAvailableAffinityMask);
 
 	nErrorCount += testSuite.Run();
 
@@ -227,7 +238,6 @@ int EAMain(int argc, char** argv)
 	EATEST_VERIFY_F(threadId == convertedThreadId , "GetThreadId failed to convert SysThreadId. ThreadId = %s, converted thread id = %s.\n", EAThreadThreadIdToString(threadId),  EAThreadThreadIdToString(convertedThreadId));
 #endif
 
-	EA::Thread::ShutdownCallstack();
 	EA::EAMain::PlatformShutdown(nErrorCount);
 
 	return nErrorCount;

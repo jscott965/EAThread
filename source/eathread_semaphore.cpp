@@ -16,12 +16,12 @@ EA_RESTORE_VC_WARNING()
 	// Fall through.
 #elif 0 //EA_USE_CPP11_CONCURRENCY
 	#include "cpp11/eathread_semaphore_cpp11.cpp"
-#elif defined(EA_PLATFORM_APPLE)
+#elif defined(__APPLE__)
 	#include "apple/eathread_semaphore_apple.cpp"
 #elif defined(EA_PLATFORM_ANDROID)
 	#include "android/eathread_semaphore_android.cpp"
 #elif defined(EA_PLATFORM_SONY)
-	#include "kettle/eathread_semaphore_kettle.cpp"
+	#include "sony/eathread_semaphore_sony.cpp"
 #elif defined(EA_PLATFORM_UNIX) || EA_POSIX_THREADS_AVAILABLE
 	#include "unix/eathread_semaphore_unix.cpp"
 #elif defined(EA_PLATFORM_MICROSOFT)

@@ -14,9 +14,9 @@
 	#include <errno.h>
 	#include <string.h>
 	#ifdef EA_PLATFORM_WINDOWS
-		EA_DISABLE_ALL_VC_WARNINGS()
+		#pragma warning(push, 0)
 		#include <Windows.h> // Presumably we are using pthreads-win32.
-		EA_RESTORE_ALL_VC_WARNINGS()
+		#pragma warning(pop)
 	#endif
 
 
@@ -69,6 +69,10 @@
 				#if defined(PTHREAD_PROCESS_PRIVATE) // Some pthread implementations don't recognize this. PTHREAD_PROCESS_SHARED bugged on iphone
 					#if defined(EA_PLATFORM_IPHONE) || defined(EA_PLATFORM_OSX)
 						EAT_ASSERT( pConditionParameters->mbIntraProcess == true ); // shared conditions bugged on apple hardware
+					#elif defined(EA_PLATFORM_NX)
+						// NX platform headers don't support 'PTHREAD_PROCESS_SHARED'.  We don't provide the else clause in the general code below.
+						if (pConditionParameters->mbIntraProcess)
+							pthread_condattr_setpshared(&cattr, PTHREAD_PROCESS_PRIVATE);
 					#else   
 						if(pConditionParameters->mbIntraProcess)
 							 pthread_condattr_setpshared(&cattr, PTHREAD_PROCESS_PRIVATE); 

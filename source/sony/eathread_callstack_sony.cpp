@@ -9,9 +9,12 @@
 #include <eathread/eathread_callstack_context.h>
 #include <eathread/eathread_storage.h>
 #include <string.h>
-#include <pthread.h>
+#include <sys/signal.h>
+#include <machine/signal.h>
+#include <sdk_version.h>
 #include <unistd.h>
-#include <unwind.h>
+
+
 
 namespace EA
 {
@@ -72,7 +75,7 @@ EATHREADLIB_API void* GetStackLimit()
 
 	pLimit = __builtin_frame_address(0);
 
-	return (void*)((uintptr_t)pLimit & ~4095); // Round down to nearest page, as the stack grows downward.
+	return (void*)((uintptr_t)pLimit & ~4095); // Round down to nearest page.
 }
 
 

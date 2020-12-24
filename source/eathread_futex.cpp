@@ -35,7 +35,7 @@
 		return true;
 	}
 
-#elif defined(EA_PLATFORM_APPLE) && EATHREAD_MANUAL_FUTEX_ENABLED
+#elif defined(__APPLE__) && EATHREAD_MANUAL_FUTEX_ENABLED
 	#include <semaphore.h>
 	#include <stdio.h>
 	#include <errno.h>
@@ -180,7 +180,7 @@
 
 	void EA::Thread::Futex::DestroyFSemaphore()
 	{
-		#if defined (EA_PLATFORM_APPLE)
+		#if defined (__APPLE__)
 			sem_close(&mSemaphore);
 		#elif defined(EA_PLATFORM_ANDROID)
 			sem_destroy(&mSemaphore);   // Android's sem_destroy is broken. http://code.google.com/p/android/issues/detail?id=3106
@@ -222,14 +222,14 @@
 
 #elif defined(EA_PLATFORM_MICROSOFT) && !EA_USE_CPP11_CONCURRENCY && !EATHREAD_MANUAL_FUTEX_ENABLED
 
-	EA_DISABLE_ALL_VC_WARNINGS()
+	#pragma warning(push, 0)
 	#include <Windows.h>
-	EA_RESTORE_ALL_VC_WARNINGS()
+	#pragma warning(pop)
 
 	// Validate what we assume to be invariants.
 	EAT_COMPILETIME_ASSERT(sizeof(CRITICAL_SECTION) <= (EA::Thread::FUTEX_PLATFORM_DATA_SIZE / sizeof(uint64_t) * sizeof(uint64_t)));
 
-	#if defined(EA_PLATFORM_MICROSOFT) && defined(EA_PROCESSOR_X86_64)
+	#if defined(EA_PLATFORM_MICROSOFT) && (defined(EA_PROCESSOR_X86_64) || defined(EA_PROCESSOR_ARM64))
 		EAT_COMPILETIME_ASSERT(offsetof(CRITICAL_SECTION, RecursionCount) == (3 * sizeof(int)));
 		EAT_COMPILETIME_ASSERT(offsetof(CRITICAL_SECTION, OwningThread)   == (4 * sizeof(int)));
 	#elif defined(EA_PLATFORM_WIN32)
@@ -243,9 +243,9 @@
 #elif defined(EA_PLATFORM_MICROSOFT) && EATHREAD_MANUAL_FUTEX_ENABLED
 
 	#if defined(EA_PLATFORM_WINDOWS)
-		EA_DISABLE_ALL_VC_WARNINGS()
+		#pragma warning(push, 0)
 		#include <Windows.h>
-		EA_RESTORE_ALL_VC_WARNINGS()
+		#pragma warning(pop)
 	#endif
 
 	void EA::Thread::Futex::CreateFSemaphore()

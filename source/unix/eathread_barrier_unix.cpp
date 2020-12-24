@@ -15,9 +15,9 @@
 	#include <string.h>
 	#include <new>
 	#ifdef EA_PLATFORM_WINDOWS
-		EA_DISABLE_ALL_VC_WARNINGS()
+		#pragma warning(push, 0)
 		#include <Windows.h> // Presumably we are using pthreads-win32.
-		EA_RESTORE_ALL_VC_WARNINGS()
+		#pragma warning(pop)
 	#endif
 
 

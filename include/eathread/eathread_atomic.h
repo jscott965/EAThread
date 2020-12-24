@@ -33,24 +33,14 @@ EA_RESTORE_ALL_VC_WARNINGS()
 
 #if !EA_THREADS_AVAILABLE
 	// Do nothing. Let the default implementation below be used.
-//#elif defined(EA_USE_CPP11_CONCURRENCY) && EA_USE_CPP11_CONCURRENCY
-//    #include <eathread/cpp11/eathread_atomic_cpp11.h> // CPP11 atomics are currently broken and slow.  To be renabled for other platforms when VS2013 released.
 #elif defined(EA_USE_COMMON_ATOMICINT_IMPLEMENTATION) && EA_USE_COMMON_ATOMICINT_IMPLEMENTATION
-	#include <eathread/internal/eathread_atomic.h>
-#elif defined(EA_PLATFORM_APPLE)
-	#include <eathread/apple/eathread_atomic_apple.h>
-#elif defined(EA_PROCESSOR_X86) || ((defined(EA_PLATFORM_WINRT) || defined(EA_PLATFORM_WINDOWS_PHONE)) && defined(EA_PROCESSOR_ARM))
+    #include <eathread/cpp11/eathread_atomic_cpp11.h> 
+#elif defined(EA_PROCESSOR_X86) || (defined(EA_PLATFORM_WINRT) && defined(EA_PROCESSOR_ARM))
 	#include <eathread/x86/eathread_atomic_x86.h>
 #elif defined(EA_PROCESSOR_X86_64)
 	#include <eathread/x86-64/eathread_atomic_x86-64.h>
-#elif defined(EA_PLATFORM_ANDROID)
-	#if EATHREAD_C11_ATOMICS_AVAILABLE
-		#include <eathread/android/eathread_atomic_android_c11.h>  // Android API 21+ only support C11 atomics
-	#else
-		#include <eathread/android/eathread_atomic_android.h>
-	#endif
-#elif defined(EA_COMPILER_GCC) || defined(CS_UNDEFINED_STRING)
-	#include <eathread/gcc/eathread_atomic_gcc.h>
+#elif defined(EA_PLATFORM_ANDROID) && EATHREAD_C11_ATOMICS_AVAILABLE
+	#include <eathread/android/eathread_atomic_android_c11.h>  // Android API 21+ only support C11 atomics
 #else
 	#error Platform not supported yet.
 #endif
@@ -414,9 +404,10 @@ namespace EA
 		#endif
 
 
-		// VC++ yields spurious warnings about void* being cast to an integer type and vice-versa.
-		// These warnings are baseless because we check for platform pointer size above.
-		EA_DISABLE_VC_WARNING(4311 4312 4251)
+		#ifdef _MSC_VER                  // VC++ yields spurious warnings about void* being cast to an integer type and vice-versa.
+			#pragma warning(push)        // These warnings are baseless because we check for platform pointer size above.
+			#pragma warning(disable: 4311 4312 4251)
+		#endif
 
 
 		/// class AtomicPointer
@@ -454,7 +445,9 @@ namespace EA
 		};
 
 
-		EA_RESTORE_VC_WARNING()
+		#ifdef _MSC_VER
+			#pragma warning(pop)
+		#endif
 
 	} // namespace Thread
 

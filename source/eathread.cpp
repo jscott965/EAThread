@@ -56,12 +56,35 @@ namespace EA
 #elif EA_USE_CPP11_CONCURRENCY
 	#include "cpp11/eathread_cpp11.cpp"
 #elif defined(EA_PLATFORM_SONY)
-   #include "kettle/eathread_kettle.cpp"
+	#include "sony/eathread_sony.cpp"
 #elif defined(EA_PLATFORM_UNIX) || EA_POSIX_THREADS_AVAILABLE
-   #include "unix/eathread_unix.cpp"
+	#include "unix/eathread_unix.cpp"
+	#if defined(EA_PLATFORM_STADIA)
+		#include "unix/eathread_stadia.cpp"
+	#endif
 #elif defined(EA_PLATFORM_MICROSOFT)
-   #include "pc/eathread_pc.cpp"
+	#include "pc/eathread_pc.cpp"
 #endif
+
+EA::Thread::ThreadAffinityMask EA::Thread::GetAvailableCpuAffinityMask()
+{
+#if defined(EA_PLATFORM_STADIA)
+	static EA::Thread::ThreadAffinityMask mask = initValidCpuAffinityMask();
+	return mask;
+#else
+	// We assume that the available cores are 0...ProcessorCount-1.
+	int processorCount = GetProcessorCount();
+	EA::Thread::ThreadAffinityMask ret = 0;
+	EA::Thread::ThreadAffinityMask mask = 1;
+	while (processorCount > 0)
+	{
+		ret |= mask;
+		mask <<= 1;
+		--processorCount;
+	}
+	return ret;
+#endif
+}
 
 namespace EA
 {
@@ -83,12 +106,6 @@ namespace EA
 		}
 	}
 }
-
-#if defined(EA_PLATFORM_ANDROID)
-	#if EATHREAD_C11_ATOMICS_AVAILABLE == 0
-		#include "android/eathread_fake_atomic_64.cpp"
-	#endif
-#endif
 
 #if !defined(EAT_ASSERT_SNPRINTF)
 	#if defined(EA_PLATFORM_MICROSOFT)
@@ -216,7 +233,7 @@ namespace EA
 
 		#elif defined(EA_PLATFORM_UNIX) || EA_POSIX_THREADS_AVAILABLE
 
-			#if defined(EA_PLATFORM_LINUX) || defined(EA_PLATFORM_CYGWIN) || (_POSIX_TIMERS > 0)
+			#if defined(EA_PLATFORM_LINUX) || defined(__CYGWIN__) || (_POSIX_TIMERS > 0)
 				ThreadTime threadTime;
 				clock_gettime(CLOCK_REALTIME, &threadTime);  // If you get a linker error about clock_getttime, you need to link librt.a (specify -lrt to the linker).
 				return threadTime;

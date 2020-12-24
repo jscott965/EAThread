@@ -16,7 +16,6 @@
 
 
 #include <EABase/eabase.h>
-#include <libkern/OSAtomic.h>
 
 
 #define EA_THREAD_SYNC_IMPLEMENTED
@@ -37,10 +36,19 @@
 
 // EAReadBarrier / EAWriteBarrier / EAReadWriteBarrier
 
-#define EAReadBarrier      OSMemoryBarrier
-#define EAWriteBarrier     OSMemoryBarrier
-#define EAReadWriteBarrier OSMemoryBarrier
+#if defined(EA_THREAD_USE_LEGACY_APPLE_BARRIERS) && EA_THREAD_USE_LEGACY_APPLE_BARRIERS 
+	#include <libkern/OSAtomic.h>
 
+	#define EAReadBarrier      OSMemoryBarrier
+	#define EAWriteBarrier     OSMemoryBarrier
+	#define EAReadWriteBarrier OSMemoryBarrier
+#else
+	#include <atomic>
+
+	#define EAReadBarrier()      std::atomic_thread_fence(std::memory_order_acquire)
+	#define EAWriteBarrier()     std::atomic_thread_fence(std::memory_order_release)
+	#define EAReadWriteBarrier() std::atomic_thread_fence(std::memory_order_seq_cst)
+#endif
 
 
 // EACompilerMemoryBarrier

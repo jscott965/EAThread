@@ -10,7 +10,7 @@ EA_DISABLE_VC_WARNING(4574)
 EA_RESTORE_VC_WARNING()
 
 #if defined(EA_PLATFORM_SONY)
-	#include "kettle/eathread_barrier_kettle.cpp"
+	#include "sony/eathread_barrier_sony.cpp"
 
 #elif (defined(EA_PLATFORM_UNIX) || EA_POSIX_THREADS_AVAILABLE) && EA_THREADS_AVAILABLE
 	// Posix already defines a barrier (via condition variables or directly with pthread_barrier).

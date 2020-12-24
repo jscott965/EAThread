@@ -23,11 +23,11 @@
 #if defined(EA_PROCESSOR_X86_64)
 	#define EA_THREAD_SYNC_IMPLEMENTED
 
-	#ifdef EA_COMPILER_MSVC
-		EA_DISABLE_ALL_VC_WARNINGS()
+	#ifdef _MSC_VER
+		#pragma warning(push, 0)
 		#include <math.h>   // VS2008 has an acknowledged bug that requires math.h (and possibly also string.h) to be #included before intrin.h.
 		#include <intrin.h>
-		EA_RESTORE_ALL_VC_WARNINGS()
+		#pragma warning(pop)
 	#endif
 
 	// By default, we define EA_TARGET_SMP to be true. The reason for this is that most 
@@ -73,7 +73,7 @@
 		#define EAReadBarrier()      __asm__ __volatile__ ("lfence" ::: "memory");
 		#define EAWriteBarrier()     __asm__ __volatile__ ("sfence" ::: "memory");
 		#define EAReadWriteBarrier() __asm__ __volatile__ ("mfence" ::: "memory");
-	#elif defined(__GNUC__) && (((__GNUC__ * 100) + __GNUC_MINOR__) >= 401) // GCC 4.1 or later, includes clang
+	#elif defined(__GNUC__) && (((__GNUC__ * 100) + __GNUC_MINOR__) >= 401) // GCC 4.1 or later
 		#define EAReadBarrier      __sync_synchronize
 		#define EAWriteBarrier     __sync_synchronize
 		#define EAReadWriteBarrier __sync_synchronize

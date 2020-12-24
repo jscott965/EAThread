@@ -74,7 +74,7 @@
 	#include <mutex>
 	EA_RESTORE_VC_WARNING()
 
-#elif defined(EA_PLATFORM_APPLE)
+#elif defined(__APPLE__)
 	#if EATHREAD_MANUAL_FUTEX_ENABLED
 		#include <eathread/eathread_semaphore.h>
 		typedef EA::Thread::Semaphore EAFutexSemaphore;
@@ -149,9 +149,9 @@ namespace EA
 {
 	namespace Thread
 	{
-		#if defined(EA_PLATFORM_WIN64)
+		#if defined(_WIN64)
 			static const int FUTEX_PLATFORM_DATA_SIZE = 40; // CRITICAL_SECTION is 40 bytes on Win64.
-		#elif defined(EA_PLATFORM_WIN32)
+		#elif defined(_WIN32)
 			static const int FUTEX_PLATFORM_DATA_SIZE = 32; // CRITICAL_SECTION is 24 bytes on Win32 and 28 bytes on XBox 360.
 		#endif
 
@@ -288,7 +288,7 @@ namespace EA
 				#elif defined(EA_COMPILER_MSVC) && defined(EA_PLATFORM_MICROSOFT) // In the case of Microsoft platforms, we just use CRITICAL_SECTION, as it is essentially a futex.
 					// We use raw structure math because otherwise we'd expose the user to system headers, 
 					// which breaks code and bloats builds. We validate our math in eathread_futex.cpp.
-					#if defined(EA_PLATFORM_WIN64)
+					#if defined(_WIN64)
 						uint64_t mCRITICAL_SECTION[FUTEX_PLATFORM_DATA_SIZE / sizeof(uint64_t)];
 					#else
 						uint64_t mCRITICAL_SECTION[FUTEX_PLATFORM_DATA_SIZE / sizeof(uint64_t)];
@@ -704,7 +704,7 @@ namespace EA
 
 					// We use raw structure math because otherwise we'd expose the user to system headers, 
 					// which breaks code and bloats builds. We validate our math in eathread_futex.cpp.
-					#if defined(EA_PLATFORM_WIN64)
+					#if defined(_WIN64)
 						return *((int*)mCRITICAL_SECTION + 3); 
 					#else
 						return *((int*)mCRITICAL_SECTION + 2);
@@ -717,7 +717,7 @@ namespace EA
 
 					// We use raw structure math because otherwise we'd expose the user to system headers, 
 					// which breaks code and bloats builds. We validate our math in eathread_futex.cpp.
-					#if defined(EA_PLATFORM_WIN64)
+					#if defined(_WIN64)
 						return (*((uint32_t*)mCRITICAL_SECTION + 4) == (uintptr_t)GetCurrentThreadId());
 					#else
 						return (*((uint32_t*)mCRITICAL_SECTION + 3) == (uintptr_t)GetCurrentThreadId());
@@ -758,7 +758,7 @@ namespace EA
 				inline void Futex::SetSpinCount(Uint)
 				  { }
 
-			#endif // EA_COMPILER_MSVC
+			#endif // _MSC_VER
 
 		#endif // EATHREAD_MANUAL_FUTEX_ENABLED
 

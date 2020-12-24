@@ -85,43 +85,13 @@ namespace EA
 		#if !EA_THREADS_AVAILABLE
 			#define EA_THREAD_LOCAL
 
-		// Disabled until we have at least one C++11 compiler that supports this which can be tested.
-		//#elif (EABASE_VERSION_N >= 20040) && !defined(EA_COMPILER_NO_THREAD_LOCAL)
-		//    #define EA_THREAD_LOCAL thread_local
+		#elif !defined(EA_COMPILER_NO_THREAD_LOCAL) || EA_USE_CPP11_CONCURRENCY
+			#define EA_THREAD_LOCAL thread_local
 
-		#elif EA_USE_CPP11_CONCURRENCY
-			#if defined(EA_COMPILER_MSVC11_0) // VC11 doesn't support C++11 thread_local storage class yet
-				#define EA_THREAD_LOCAL __declspec(thread)
-			#else
-				#define EA_THREAD_LOCAL thread_local
-			#endif
-
-		#elif defined(EA_PLATFORM_APPLE)
-			// http://clang.llvm.org/docs/LanguageExtensions.html
-			#if __has_feature(cxx_thread_local)
-				#define EA_THREAD_LOCAL thread_local
-			#else
-				#define EA_THREAD_LOCAL 
-			#endif
-		#elif ((defined(__GNUC__) && ((__GNUC__ >= 4) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 3))))) \
-			&& (defined(EA_PLATFORM_WINDOWS) || defined(EA_PLATFORM_UNIX)) // Any of the Unix variants, including Mac OSX.
-			// While GNUC v3.3 is the first version that supports thread local storage
-			// declarators, not all versions of GNUC for all platforms support it, 
-			// as it requires support from other tools and libraries beyond the compiler.
-			// Rafaël: Using __GNUC__ and __GNUC_MINOR__ here to put Clang in the equation too.
-			#if defined(EA_PLATFORM_CYGWIN) // Cygwin's branch of the GCC toolchain does not currently support TLS.
-				// Not supported.
-			#else
-				#define EA_THREAD_LOCAL __thread
-			#endif
-
-		#elif defined(EA_COMPILER_MSVC) || defined(EA_COMPILER_BORLAND) || (defined(EA_PLATFORM_WINDOWS) &&  defined(EA_COMPILER_INTEL))
+		#elif defined(EA_COMPILER_MSVC)
 			// This appears to be supported by VC++, Borland C++.
 			// And it is supported by all compilers for the Windows platform.
 			#define EA_THREAD_LOCAL __declspec(thread)
-
-		#elif defined(EA_PLATFORM_SONY) || defined(CS_UNDEFINED_STRING)
-			#define EA_THREAD_LOCAL __thread
 
 		#else
 			// Else don't define it as anything. This will result in a compilation 
@@ -155,7 +125,7 @@ namespace EA
 		ScePthreadKey mKey;     // This is usually a pointer.
 		int           mResult;  // Result of call to scePthreadKeyCreate, so we can know if mKey is valid.
 	};
-#elif (defined(EA_PLATFORM_UNIX) || EA_POSIX_THREADS_AVAILABLE) && !defined(CS_UNDEFINED_STRING)
+#elif (defined(EA_PLATFORM_UNIX) || EA_POSIX_THREADS_AVAILABLE) && !defined(EA_PLATFORM_NX)
 	// In this case we will be using pthread_key_create, pthread_key_delete, pthread_getspecific, pthread_setspecific.
 	#include <pthread.h>
 
@@ -168,7 +138,7 @@ namespace EA
 	// In this case we will be using TlsAlloc, TlsFree, TlsGetValue, TlsSetValue.
 	typedef uint32_t EAThreadLocalStorageData;
 
-#elif (!EA_THREADS_AVAILABLE || defined(EA_PLATFORM_CONSOLE)) && !defined(CS_UNDEFINED_STRING)
+#elif (!EA_THREADS_AVAILABLE || defined(EA_PLATFORM_CONSOLE)) && !defined(EA_PLATFORM_NX)
 	#include <eathread/eathread.h>
 
 	struct EAThreadLocalStorageData

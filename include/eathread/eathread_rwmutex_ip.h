@@ -18,19 +18,22 @@
 #include <eathread/eathread.h>
 #include <new>
 #if EA_WINAPI_FAMILY_PARTITION(EA_WINAPI_PARTITION_DESKTOP)
-	EA_DISABLE_ALL_VC_WARNINGS()
+	#pragma warning(push, 0)
 	#include <Windows.h>
-	EA_RESTORE_ALL_VC_WARNINGS()
+	#pragma warning(pop)
 #endif
 
 #if defined(EA_PRAGMA_ONCE_SUPPORTED)
 	#pragma once // Some compilers (e.g. VC++) benefit significantly from using this. We've measured 3-4% build speed improvements in apps as a result.
 #endif
 
-// We have to be careful about disabling this warning. Sometimes the warning is meaningful; sometimes it isn't.
-// 4251: class (some template) needs to have dll-interface to be used by clients.
-// 6054: String 'argument 2' might not be zero-terminated
-EA_DISABLE_VC_WARNING(4251 6054)
+
+#ifdef _MSC_VER
+	#pragma warning(push)           // We have to be careful about disabling this warning. Sometimes the warning is meaningful; sometimes it isn't.
+	#pragma warning(disable: 4251)  // class (some template) needs to have dll-interface to be used by clients.
+	#pragma warning(disable: 6054)  // String 'argument 2' might not be zero-terminated
+#endif
+
 
 namespace EA
 {
@@ -410,6 +413,18 @@ namespace EA
 
 } // namespace EA
 
-EA_RESTORE_VC_WARNING()
+
+
+#ifdef _MSC_VER
+	#pragma warning(pop)
+#endif
+
 
 #endif // EATHREAD_EATHREAD_RWMUTEX_IP_H
+
+
+
+
+
+
+

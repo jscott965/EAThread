@@ -13,14 +13,15 @@
 	#include <pthread.h>
 	#include <sched.h>
 	#include <string.h>
+	#include <errno.h>
 	#ifdef EA_PLATFORM_WINDOWS
-		EA_DISABLE_ALL_VC_WARNINGS()
+		#pragma warning(push, 0)
 		#include <Windows.h> // Presumably we are using pthreads-win32.
-		EA_RESTORE_ALL_VC_WARNINGS()
+		#pragma warning(pop)
 		#include <time.h>
 	#else
 		#include <unistd.h>
-		#if defined(EA_HAVE_DINKUMWARE_CPP_LIBRARY)
+		#if defined(_YVALS)
 			#include <time.h>
 		#else
 			#include <sys/time.h>
@@ -35,19 +36,23 @@
 			#include <sys/prctl.h>
 		#endif
 
-		#if defined(EA_PLATFORM_APPLE)
+		#if defined(EA_PLATFORM_APPLE) || defined(__APPLE__)
 			#include <dlfcn.h>
 		#endif
 	
-		#if defined(EA_PLATFORM_BSD) || defined(EA_PLATFORM_CONSOLE_BSD) || defined(EA_PLATFORM_FREEBSD)
+		#if defined(EA_PLATFORM_BSD) || defined(EA_PLATFORM_CONSOLE_BSD) || defined(__FreeBSD__)
 			#include <sys/param.h>
 			#include <pthread_np.h>
 		#endif
 
 		#if defined(EA_PLATFORM_ANDROID)
 			#include <sys/syscall.h>
+			#include <cpufeatures/cpu-features.h>
 		#endif
 		
+		#if defined(EA_PLATFORM_NX)
+			#include <memory.h>
+		#endif
 	#endif
 
 	namespace EA
@@ -86,13 +91,13 @@
 
 		if(result == 0)
 		{
-			#if defined(EA_PLATFORM_LINUX) && !defined(EA_PLATFORM_CYGWIN)
+			#if defined(EA_PLATFORM_LINUX) && !defined(__CYGWIN__)
 				return kThreadPriorityDefault + param.sched_priority; // This works for both SCHED_OTHER, SCHED_RR, and SCHED_FIFO.
 			#else
 				#if defined(EA_PLATFORM_WINDOWS)
 					if(param.sched_priority == THREAD_PRIORITY_NORMAL)
 						return kThreadPriorityDefault;
-				#elif !(defined(EA_PLATFORM_CYGWIN) || defined(CS_UNDEFINED_STRING))
+				#elif !(defined(__CYGWIN__) || defined(EA_PLATFORM_NX))
 					if(policy == SCHED_OTHER)
 						return 0; // 0 is the only native priority permitted with the SCHED_OTHER scheduling scheme.
 				#endif
@@ -125,7 +130,7 @@
 
 		EAT_ASSERT(nPriority != kThreadPriorityUnknown);
 
-		#if defined(EA_PLATFORM_LINUX) && !defined(EA_PLATFORM_CYGWIN)
+		#if defined(EA_PLATFORM_LINUX) && !defined(__CYGWIN__)
 			// We are assuming Kernel 2.6 and later behavior, but perhaps we should dynamically detect.
 			// Linux supports three scheduling policies SCHED_OTHER, SCHED_RR, and SCHED_FIFO. 
 			// The process needs to be run with superuser privileges to use SCHED_RR or SCHED_FIFO.
@@ -155,7 +160,7 @@
 			if(result == 0)
 			{
 				// Cygwin does not support any scheduling policy other than SCHED_OTHER.
-				#if !defined(EA_PLATFORM_CYGWIN)
+				#if !defined(__CYGWIN__)
 					if(policy == SCHED_OTHER)
 						policy = SCHED_FIFO;
 				#endif
@@ -203,7 +208,7 @@
 			thr_stksegment(&s);
 			return s.ss_sp;  // Note that this is not the sp pointer (which would refer to the a location low in the stack address space). When returned by thr_stksegment(), ss_sp refers to the top (base) of the stack.
 
-		#elif defined(EA_PLATFORM_CYGWIN)
+		#elif defined(__CYGWIN__)
 			// Cygwin reserves pthread_attr_getstackaddr and pthread_attr_getstacksize for future use.
 			// The solution here is probably to use the Windows implementation of this here.
 			return 0;
@@ -216,7 +221,7 @@
 			pthread_attr_t sattr;
 			pthread_attr_init(&sattr);
 
-			#if defined(EA_PLATFORM_BSD) || defined(EA_PLATFORM_CONSOLE_BSD) || defined(EA_PLATFORM_FREEBSD)
+			#if defined(EA_PLATFORM_BSD) || defined(EA_PLATFORM_CONSOLE_BSD) || defined(__FreeBSD__)
 				pthread_attr_get_np(threadId, &sattr);
 			#elif defined(EA_HAVE_pthread_getattr_np_DECL)
 				// Note: this function is non-portable; various Unix systems may have different np alternatives
@@ -236,45 +241,49 @@
 		#endif
 	}
 
-
 	void EA::Thread::SetThreadProcessor(int nProcessor)
 	{
 		// Posix threading doesn't have the ability to set the processor.
 		#if defined(EA_PLATFORM_WINDOWS)
-			static int nProcessorCount = 0; // This doesn't really need to be an atomic integer.
-
-			if(nProcessorCount == 0)
-			{
-				SYSTEM_INFO systemInfo;
-				memset(&systemInfo, 0, sizeof(systemInfo));
-				GetSystemInfo(&systemInfo);
-				nProcessorCount = (int)systemInfo.dwNumberOfProcessors;
-			}
-
 			DWORD dwThreadAffinityMask;
 
-			if((nProcessor < 0) || (nProcessor >= nProcessorCount))
+			if((nProcessor < 0) || (nProcessor >= EA::Thread::GetProcessorCount()))
 				dwThreadAffinityMask = 0xffffffff;
 			else
 				dwThreadAffinityMask = 1 << nProcessor;
+
 			SetThreadAffinityMask(GetCurrentThread(), dwThreadAffinityMask);
 
-		#elif (defined(EA_PLATFORM_LINUX) && !defined(EA_PLATFORM_ANDROID)) || defined(CS_UNDEFINED_STRING)
+		#elif (defined(EA_PLATFORM_LINUX) && !defined(EA_PLATFORM_ANDROID)) || defined(EA_PLATFORM_NX)
 			cpu_set_t cpus;
 			CPU_ZERO(&cpus);
-			CPU_SET(nProcessor, &cpus);
 
-			for (int c = 0; c < EA::Thread::GetProcessorCount(); c++, nProcessor >>= 1)
+			if (nProcessor >= 0)
 			{
-				if (nProcessor & 1)
+				// Ignore for processors we can't run on.
+				if ((EA::Thread::GetAvailableCpuAffinityMask() & (1 << nProcessor)) == 0)
 				{
+					EAT_FAIL_MSG("Requested processor is not available!");
+					return;
+				}
+
+				CPU_SET(nProcessor, &cpus);
+			}
+			else
+			{
+				for (int c = 0; c < EA::Thread::GetProcessorCount(); c++)
+				{
+					// Skip over processors that are not available.
+					if (((1 << c) & EA::Thread::GetAvailableCpuAffinityMask()) == 0)
+						continue;
+
 					CPU_SET(c, &cpus);
 				}
 			}
 
-			// To consider: Make it so we return a value.
-			/*int result =*/ pthread_setaffinity_np(pthread_self(), sizeof(cpus), &cpus);
-			// We don't assert on the success, as that could be very noisy for some users.
+			int result = pthread_setaffinity_np(pthread_self(), sizeof(cpus), &cpus);
+			EAT_ASSERT_FORMATTED(result == 0, "pthread_setaffinity_np: error %x %x", result, errno);
+			EA_UNUSED(result);
 
 		#else
 			// Other Unix platforms don't provide a means to specify what processor a thread runs on. 
@@ -284,7 +293,7 @@
 	}
 
 
-	#if defined(EA_PLATFORM_WINDOWS) && defined(EA_PROCESSOR_X86) && defined(EA_COMPILER_MSVC) && (EA_COMPILER_VERSION >= 1400)
+	#if defined(EA_PLATFORM_WINDOWS) && defined(EA_PROCESSOR_X86) && defined(MSC_VER) && (MSC_VER >= 1400)
 		int GetCurrentProcessorNumberXP()
 		{
 			_asm { mov eax, 1   }
@@ -316,7 +325,7 @@
 			if(pfnGetCurrentProcessorNumber)
 				return (int)(unsigned)pfnGetCurrentProcessorNumber();
 
-			#if defined(EA_PLATFORM_WINDOWS) && defined(EA_PROCESSOR_X86) && defined(EA_COMPILER_MSVC) && (EA_COMPILER_VERSION >= 1400)
+			#if defined(EA_PLATFORM_WINDOWS) && defined(EA_PROCESSOR_X86) && defined(MSC_VER) && (MSC_VER >= 1400)
 				return GetCurrentProcessorNumberXP();
 			#else
 				return 0;
@@ -355,31 +364,103 @@
 			}
 			
 			return 0;
+        #elif EA_PLATFORM_NX
+            cpu_set_t cpus;
+            CPU_ZERO(&cpus);
+            pthread_getaffinity_np(pthread_self(), sizeof(cpus), &cpus);
+            for(int i = 0; i < CPU_SETSIZE; i++)
+            {
+                if(CPU_ISSET(i, &cpus))
+                    return i;
+            }
+            return 0;
 		#else
 			return 0;
 		#endif
 	}
 
+#if defined(EA_PLATFORM_APPLE)
+	#include <mach/thread_policy.h>
+	#include <mach/thread_act.h>
+	#define SYSCTL_CORE_COUNT "machdep.cpu.core_count"
+
+	typedef struct cpu_set
+	{
+		uint32_t count;
+	} cpu_set_t;
+
+	static inline void CPU_ZERO(cpu_set_t* cs)           { cs->count = 0; }
+	static inline void CPU_SET(int num, cpu_set_t* cs)   { cs->count |= (1 << num); }
+	static inline int  CPU_ISSET(int num, cpu_set_t* cs) { return (cs->count & (1 << num)); }
+
+	int pthread_setaffinity_np(pthread_t thread, size_t cpu_size, cpu_set_t* cpu_set)
+	{
+		thread_port_t mach_thread;
+		int core = 0;
+
+		for (core = 0; core < 8 * cpu_size; core++)
+		{
+			if (CPU_ISSET(core, cpu_set))
+				break;
+		}
+
+		thread_affinity_policy_data_t policy = {core};
+		mach_thread = pthread_mach_thread_np(thread);
+		thread_policy_set(mach_thread, THREAD_AFFINITY_POLICY, (thread_policy_t)&policy, 1);
+
+		return 0;
+	}
+#endif
+
+#if defined(EA_PLATFORM_ANDROID) && __ANDROID_API__ <= 19
+	typedef struct cpu_set
+	{
+		uint32_t count;
+	} cpu_set_t;
+
+	static inline void CPU_ZERO(cpu_set_t* cs)           { cs->count = 0; }
+	static inline void CPU_SET(int num, cpu_set_t* cs)   { cs->count |= (1 << num); }
+	static inline int  CPU_ISSET(int num, cpu_set_t* cs) { return (cs->count & (1 << num)); }
+#endif
+
 	EATHREADLIB_API void EA::Thread::SetThreadAffinityMask(const EA::Thread::ThreadId& id, ThreadAffinityMask nAffinityMask)
 	{
+		// Replace kThreadAffinityMaskAny, with AvailableCpuAffinityMask.
+		if (nAffinityMask == kThreadAffinityMaskAny)
+			nAffinityMask = EA::Thread::GetAvailableCpuAffinityMask();
+
+		ThreadAffinityMask sanitizedMask = nAffinityMask & EA::Thread::GetAvailableCpuAffinityMask();
+		EAT_ASSERT_MSG(sanitizedMask != 0, "None of the requested processors are available!");
+
 		EAThreadDynamicData* const pTDD = FindThreadDynamicData(id);
 		if(pTDD)
 		{
-			pTDD->mnThreadAffinityMask = nAffinityMask;
+			pTDD->mnThreadAffinityMask = sanitizedMask;
 	
 			#if EATHREAD_THREAD_AFFINITY_MASK_SUPPORTED
 				cpu_set_t cpuSetMask;
 				memset(&cpuSetMask, 0, sizeof(cpu_set_t));
 
-				for (int c = 0; c < EA::Thread::GetProcessorCount(); c++, nAffinityMask >>= 1)
+				for (int c = 0; c < EA::Thread::GetProcessorCount(); c++, sanitizedMask >>= 1)
 				{
-					if (nAffinityMask & 1)
+					if (sanitizedMask & 1)
 					{
 						CPU_SET(c, &cpuSetMask);
 					}
 				}
 				
+				#if defined(EA_PLATFORM_NX) || defined(EA_PLATFORM_APPLE)
+					int result = pthread_setaffinity_np(pTDD->mThreadId, sizeof(cpu_set_t), &cpuSetMask);
+					EAT_ASSERT_FORMATTED(result == 0, "pthread_setaffinity_np: error %x %x", result, errno);
+					EA_UNUSED(result);
+				#elif defined(EA_PLATFORM_ANDROID) && __ANDROID_API__ <= 19
+                    if(pTDD->mThreadPid != 0) 
+                    {
+                        syscall(__NR_sched_setaffinity, pTDD->mThreadPid, sizeof(nAffinityMask), &nAffinityMask);
+                    }
+				#else
 					sched_setaffinity(pTDD->mThreadPid, sizeof(cpu_set_t), &cpuSetMask);
+				#endif
 			#endif
 		}
 	}
@@ -422,7 +503,7 @@
 					nameBuf[15] = 0;
 					prctl(PR_SET_NAME, (unsigned long)nameBuf, 0, 0, 0);
 
-				#elif defined(EA_PLATFORM_APPLE)
+				#elif defined(EA_PLATFORM_APPLE) || defined(__APPLE__)
 					// http://src.chromium.org/viewvc/chrome/trunk/src/base/platform_thread_mac.mm?revision=49465&view=markup&pathrev=49465
 					// "There's a non-portable function for doing this: pthread_setname_np.
 					// It's supported by OS X >= 10.6 and the Xcode debugger will show the thread
@@ -440,9 +521,12 @@
 						pthread_setname_np_ptr(nameBuf);
 					}
 
-				#elif defined(EA_PLATFORM_BSD) || defined(EA_PLATFORM_CONSOLE_BSD) || defined(EA_PLATFORM_FREEBSD)
+				#elif defined(EA_PLATFORM_BSD) || defined(EA_PLATFORM_CONSOLE_BSD) || defined(__FreeBSD__)
 					// http://www.unix.com/man-page/freebsd/3/PTHREAD_SET_NAME_NP/
 					pthread_set_name_np(pthread_self(), pName);
+				#elif defined(EA_PLATFORM_NX)
+					// http://www.unix.com/man-page/freebsd/3/PTHREAD_SET_NAME_NP/
+					pthread_setname_np(pthread_self(), pName);	
 				#endif
 			}
 
@@ -473,6 +557,10 @@
 				if(GetId(pTDD) != EA::Thread::kThreadIdInvalid)
 					pthread_set_name_np(GetId(pTDD), pTDD->mName);
 					
+			#elif defined(EA_PLATFORM_NX)
+				if (GetId(pTDD) != EA::Thread::kThreadIdInvalid)
+					pthread_setname_np(GetId(pTDD), pTDD->mName);
+
 			#endif
 		}
 	} // namespace Internal 
@@ -556,6 +644,10 @@
 			// if(sysctlbyname("hw.ncpu", &cpuCount, &len, NULL, 0) != 0) 
 			//     cpuCount = 1;
 			// return cpuCount;
+		#elif defined(EA_PLATFORM_NX)
+			return 3;
+		#elif defined(EA_PLATFORM_ANDROID)
+			return android_getCpuCount();
 		#else
 			// Posix doesn't provide a means to get this information.
 			// Some Unixes provide sysconf() with the _SC_NPROCESSORS_ONLN or _SC_NPROCESSORS_CONF option.
@@ -567,7 +659,6 @@
 			#endif
 		#endif
 	}
-
 
 	#if defined(EA_PLATFORM_WINDOWS)
 		extern "C" __declspec(dllimport) void __stdcall Sleep(unsigned long dwMilliseconds);
@@ -637,7 +728,7 @@
 	
 	EA::Thread::ThreadTime EA::Thread::GetThreadTime()
 	{
-		#if defined(EA_PLATFORM_WINDOWS) && !defined(EA_PLATFORM_CYGWIN)
+		#if defined(EA_PLATFORM_WINDOWS) && !defined(__CYGWIN__)
 			// We use this code instead of GetTickCount or similar because pthreads under
 			// Win32 uses the 'system file time' definition (e.g. GetSystemTimeAsFileTime()) 
 			// for current time. The implementation here is just like that in the 
@@ -659,7 +750,7 @@
 			//return threadTime;
 		#else
 			// For some systems we may need to use gettimeofday() instead of clock_gettime().
-			#if defined(EA_PLATFORM_LINUX) || defined(EA_PLATFORM_CYGWIN) || (_POSIX_TIMERS > 0)
+			#if defined(EA_PLATFORM_LINUX) || defined(__CYGWIN__) || (_POSIX_TIMERS > 0)
 				ThreadTime threadTime;
 				clock_gettime(CLOCK_REALTIME, &threadTime);  // If you get a linker error about clock_getttime, you need to link librt.a (specify -lrt to the linker).
 				return threadTime;

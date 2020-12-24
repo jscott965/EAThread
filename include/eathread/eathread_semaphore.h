@@ -78,7 +78,7 @@
 		EASemaphoreData();
 	};
 
-#elif defined(EA_PLATFORM_APPLE)
+#elif defined(__APPLE__)
 
 	#include <mach/semaphore.h>
 	#include <eathread/eathread_atomic.h>

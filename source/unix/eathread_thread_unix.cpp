@@ -10,6 +10,9 @@
 #include <eathread/eathread_sync.h>
 #include "eathread/internal/eathread_global.h"
 
+#if defined(EA_PLATFORM_NX)
+	#include <eathread/eathread_futex.h>  // used by gDeadThreadsFutex
+#endif
 
 #if defined(EA_PLATFORM_UNIX) || EA_POSIX_THREADS_AVAILABLE
     #include <new>
@@ -27,10 +30,10 @@
         #include <sys/prctl.h>
         #include <sys/syscall.h>
         #include <unistd.h>
-    #elif defined(EA_PLATFORM_APPLE)
+    #elif defined(EA_PLATFORM_APPLE) || defined(__APPLE__)
 		#include <unistd.h>
         #include <dlfcn.h>
-    #elif defined(EA_PLATFORM_BSD) || defined(EA_PLATFORM_CONSOLE_BSD) || defined(EA_PLATFORM_FREEBSD)
+    #elif defined(EA_PLATFORM_BSD) || defined(EA_PLATFORM_CONSOLE_BSD) || defined(__FreeBSD__)
         #include <pthread_np.h>
     #endif
 
@@ -60,7 +63,7 @@ namespace
         #if defined(EA_PLATFORM_WINDOWS)
             param.sched_priority = THREAD_PRIORITY_NORMAL + (nPriority - kThreadPriorityDefault);
 
-        #elif defined(EA_PLATFORM_LINUX) && !defined(EA_PLATFORM_CYGWIN)
+        #elif defined(EA_PLATFORM_LINUX) && !defined(__CYGWIN__)
             // We are assuming Kernel 2.6 and later behaviour, but perhaps we should dynamically detect.
             // Linux supports three scheduling policies SCHED_OTHER, SCHED_RR, and SCHED_FIFO. 
             // The process needs to be run with superuser privileges to use SCHED_RR or SCHED_FIFO.
@@ -95,7 +98,7 @@ namespace
             #endif
 
         #else
-            #if defined(EA_PLATFORM_CYGWIN)
+            #if defined(__CYGWIN__)
                 policy = SCHED_OTHER;
             #else
                 policy = SCHED_FIFO;
@@ -134,14 +137,14 @@ namespace
     {
         using namespace EA::Thread;
 
-        #if defined(EA_PLATFORM_LINUX) && !defined(EA_PLATFORM_CYGWIN)
+        #if defined(EA_PLATFORM_LINUX) && !defined(__CYGWIN__)
             EA_UNUSED(policy);
             return kThreadPriorityDefault + param.sched_priority; // This works for both SCHED_OTHER, SCHED_RR, and SCHED_FIFO.
         #else
             #if defined(EA_PLATFORM_WINDOWS) // In the case of windows, we know for sure that normal priority is defined by 'THREAD_PRIORITY_NORMAL'.
                 if(param.sched_priority == THREAD_PRIORITY_NORMAL)
                     return kThreadPriorityDefault;
-            #elif !(defined(EA_PLATFORM_CYGWIN) || defined(CS_UNDEFINED_STRING))
+            #elif !(defined(__CYGWIN__) || defined(EA_PLATFORM_NX))
                 if(policy == SCHED_OTHER)
                     return 0;   // 0 is the only priority permitted with the SCHED_OTHER scheduling scheme.
             #endif
@@ -177,16 +180,23 @@ namespace
             {
                 EAT_ASSERT(pTP->mnStackSize != 0);
 
-                #if !defined(EA_PLATFORM_CYGWIN) // Some implementations of pthreads does not support pthread_attr_setstack.
-                    #if defined(PTHREAD_STACK_MIN)
-                        EAT_ASSERT((pTP->mnStackSize >= PTHREAD_STACK_MIN));
-                    #endif
+                #if !defined(__CYGWIN__)  // Some implementations of pthreads does not support pthread_attr_setstack.
+					#if defined(EA_PLATFORM_NX)
+						EAT_ASSERT((pTP->mnStackSize & 4095) == 0);	// stack size has to be 4k aligned on NX.
+						EAT_ASSERT(((uintptr_t)pTP->mpStack & 4095) == 0);	// stack has to be 4k aligned on NX.
+					#endif
+					#if defined(PTHREAD_STACK_MIN)
+						EAT_ASSERT((pTP->mnStackSize >= PTHREAD_STACK_MIN));
+					#endif
                     result = pthread_attr_setstack(&creationAttribs, (void*)pTP->mpStack, pTP->mnStackSize);
                     EAT_ASSERT(result == 0);
                 #endif
             }
             else if(pTP->mnStackSize)
             {
+			#if defined(EA_PLATFORM_NX)
+				EAT_ASSERT((pTP->mnStackSize & 4095) == 0);	// stack size has to be 4k aligned.
+			#endif
 			#if defined(PTHREAD_STACK_MIN)
 				EAT_ASSERT((pTP->mnStackSize >= PTHREAD_STACK_MIN));
 			#endif
@@ -217,7 +227,7 @@ namespace
     {
         if(pTDD->mThreadId != EA::Thread::kThreadIdInvalid) // If the thread has been created...
         {
-            #if defined(EA_PLATFORM_LINUX) || defined(CS_UNDEFINED_STRING)
+            #if defined(EA_PLATFORM_LINUX) || defined(EA_PLATFORM_NX)
                 EAT_ASSERT(pTDD && (pTDD->mThreadId != EA::Thread::kThreadIdInvalid));
 
                 #if defined(EA_PLATFORM_ANDROID) // Android doesn't provide pthread_setaffinity_np.
@@ -230,10 +240,14 @@ namespace
                 #else
                     cpu_set_t cpus;
                     CPU_ZERO(&cpus);
+
+					EAT_ASSERT_MSG(((1 << pTDD->mStartupProcessor) & EA::Thread::GetAvailableCpuAffinityMask()) != 0, "Processor not available!");
+
                     CPU_SET(pTDD->mStartupProcessor, &cpus);
 
-                    pthread_setaffinity_np(pTDD->mThreadId, sizeof(cpus), &cpus);
-                    // We don't assert on the pthread_setaffinity_np return value, as that could be very noisy for some users.   
+                    int result = pthread_setaffinity_np(pTDD->mThreadId, sizeof(cpus), &cpus);
+					EAT_ASSERT_MSG(result == 0, "pthread_setaffinity_np: failure");
+					EA_UNUSED(result);
                 #endif
             #endif
         }
@@ -383,6 +397,60 @@ namespace EA
         }
         #endif
 
+#if defined(EA_PLATFORM_NX)
+		// Nintendo doesn't properly support pthread_detach, so we need to use pthread_join instead.
+		// Since a thread is not allowed to join itself (and joining a not-yet-dead thread is not ideal)
+		// we queue up a couple of threadIds and have later threads to die, join the earlier ones.
+
+		static ThreadId sDeadThreadIds[] =
+		{
+			EA::Thread::kThreadIdInvalid,  // 0
+			EA::Thread::kThreadIdInvalid,  // 1
+			EA::Thread::kThreadIdInvalid,  // 2
+			EA::Thread::kThreadIdInvalid,  // 3
+		};
+		Futex gDeadThreadsFutex;
+
+		static void NX_PushDeadThreadId(ThreadId threadId)
+		{
+			ThreadId tempId;
+
+			{
+				AutoFutex _(gDeadThreadsFutex);
+
+				// grab oldest entry, from end of array
+				tempId = sDeadThreadIds[EAArrayCount(sDeadThreadIds) - 1];
+
+				// shift array contents forward
+				memmove(sDeadThreadIds + 1, sDeadThreadIds, sizeof(sDeadThreadIds) - sizeof(sDeadThreadIds[0]));
+
+				sDeadThreadIds[0] = threadId;
+			}
+
+			if (tempId != EA::Thread::kThreadIdInvalid)
+				pthread_join(tempId, NULL);
+		}
+
+		void NX_CleanupDeadThreads()
+		{
+			ThreadId tempIds[EAArrayCount(sDeadThreadIds)];
+
+			{
+				AutoFutex _(gDeadThreadsFutex);
+				for (int i = 0; i < EAArrayCount(sDeadThreadIds); ++i)
+				{
+					tempIds[i] = sDeadThreadIds[i];
+					sDeadThreadIds[i] = EA::Thread::kThreadIdInvalid;
+				}
+			}
+
+			for (int i = 0; i < EAArrayCount(tempIds); ++i)
+			{
+				if (tempIds[i] != EA::Thread::kThreadIdInvalid)
+					pthread_join(tempIds[i], NULL);
+			}
+		}
+#endif  // defined(EA_PLATFORM_NX)
     }
 }
 
@@ -411,7 +479,11 @@ EAThreadDynamicData::~EAThreadDynamicData()
 {
 	if (mThreadId != EA::Thread::kThreadIdInvalid)
 	{
+	#if defined(EA_PLATFORM_NX)
+		EA::Thread::NX_PushDeadThreadId(mThreadId);
+	#else
 		pthread_detach(mThreadId);
+	#endif
 	}
 
 	mThreadId = EA::Thread::kThreadIdInvalid;
@@ -436,7 +508,11 @@ void EAThreadDynamicData::Release()
 EA::Thread::ThreadParameters::ThreadParameters()
   : mpStack(NULL),
     mnStackSize(0),
+	#ifdef EA_PLATFORM_NX
+		mnPriority(kThreadPriorityMin),  
+	#else
 		mnPriority(kThreadPriorityDefault),  
+	#endif
     mnProcessor(kProcessorDefault),
     mpName(""),
     mnAffinityMask(kThreadAffinityMaskAny),
@@ -543,6 +619,12 @@ static void* RunnableFunctionInternal(void* pContext)
             SetPlatformThreadAffinity(pTDD);
         else if(pTDD->mStartupProcessor == EA::Thread::kProcessorAny)
             EA::Thread::SetThreadAffinityMask(pTDD->mnThreadAffinityMask);
+	#elif defined(EA_PLATFORM_NX) 
+		// We do this to emulate the behavior of other consoles that default create thread 
+		// with an affinity capable of floating across all available cores.
+		if(pTDD->mStartupProcessor == EA::Thread::kProcessorDefault)
+			EA::Thread::SetThreadAffinityMask(EA::Thread::kThreadAffinityMaskAny);
+		
     #elif !defined(EA_PLATFORM_CONSOLE) && !defined(EA_PLATFORM_MOBILE)
         pTDD->mThreadPid = getpid(); // We can't set a thread affinity with a process id. 
     #else
@@ -1010,7 +1092,7 @@ void EA::Thread::Thread::SetProcessor(int nProcessor)
 
 void EA::Thread::Thread::SetAffinityMask(EA::Thread::ThreadAffinityMask nAffinityMask)
 {
-    if(mThreadData.mpData->mThreadId)
+    if(mThreadData.mpData && mThreadData.mpData->mThreadId)
     {
         SetThreadAffinityMask(mThreadData.mpData->mThreadId, nAffinityMask);
     }
@@ -1018,7 +1100,7 @@ void EA::Thread::Thread::SetAffinityMask(EA::Thread::ThreadAffinityMask nAffinit
 
 EA::Thread::ThreadAffinityMask EA::Thread::Thread::GetAffinityMask()
 {
-    if(mThreadData.mpData->mThreadId)
+    if(mThreadData.mpData && mThreadData.mpData->mThreadId)
     {
         return mThreadData.mpData->mnThreadAffinityMask;
     }

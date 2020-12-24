@@ -17,14 +17,15 @@
 #include <eathread/eathread.h>
 
 
-#if defined(EA_DLL) && defined(EA_COMPILER_MSVC)
+#if defined(EA_DLL) && defined(_MSC_VER)
 	// Suppress warning about class 'AtomicInt32' needs to have a
 	// dll-interface to be used by clients of class which have a templated member.
 	// 
 	// These templates cannot be instantiated outside of the DLL. If you try, a
 	// link error will result. This compiler warning is intended to notify users
 	// of this.
-	EA_DISABLE_VC_WARNING(4251)
+	#pragma warning(push)
+	#pragma warning(disable: 4251)
 #endif
 
 #if defined(EA_PRAGMA_ONCE_SUPPORTED)
@@ -226,9 +227,9 @@ namespace EA
 } // namespace EA
 
 
-#if defined(EA_DLL) && defined(EA_COMPILER_MSVC)
-	// re-enable warning(s) disabled above.
-	EA_RESTORE_VC_WARNING()
+#if defined(EA_DLL) && defined(_MSC_VER)
+   // re-enable warning(s) disabled above.
+   #pragma warning(pop)
 #endif
 
 

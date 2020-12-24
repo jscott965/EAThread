@@ -13,7 +13,7 @@
 #elif EA_USE_CPP11_CONCURRENCY
 	#include "cpp11/eathread_thread_cpp11.cpp"
 #elif defined(EA_PLATFORM_SONY)
-	#include "kettle/eathread_thread_kettle.cpp"
+	#include "sony/eathread_thread_sony.cpp"
 #elif defined(EA_PLATFORM_UNIX) || EA_POSIX_THREADS_AVAILABLE
 	#include "unix/eathread_thread_unix.cpp"
 #elif defined(EA_PLATFORM_MICROSOFT)

@@ -16,6 +16,8 @@ extern bool IsSuperUser();
 		#define EATHREAD_MAX_CONCURRENT_THREAD_COUNT 16
 	#elif defined(EA_PLATFORM_MOBILE)
 		#define EATHREAD_MAX_CONCURRENT_THREAD_COUNT 4
+	#elif defined(EA_PLATFORM_NX)
+		#define EATHREAD_MAX_CONCURRENT_THREAD_COUNT 2 // -1 core so we don't kick off the main thread
 	#else
 		#define EATHREAD_MAX_CONCURRENT_THREAD_COUNT 8
 	#endif
@@ -40,6 +42,7 @@ int TestThreadThreadPool();
 int TestThreadSmartPtr();
 int TestThreadMisc();
 int TestEnumerateThreads();
+int TestCpuAvailableAffinityMask();
 
 #endif // Header include guard
 

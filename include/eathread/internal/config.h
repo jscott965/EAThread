@@ -38,8 +38,8 @@ EA_RESTORE_VC_WARNING()
 //     printf("EATHREAD_VERSION version: %d.%d.%d", EATHREAD_VERSION_N / 10000 % 100, EATHREAD_VERSION_N / 100 % 100, EATHREAD_VERSION_N % 100);
 //
 #ifndef EATHREAD_VERSION
-	#define EATHREAD_VERSION   "1.32.09"
-	#define EATHREAD_VERSION_N  13209
+	#define EATHREAD_VERSION   "1.33.00"
+	#define EATHREAD_VERSION_N  13300
 
 	// Older style version info
 	#define EATHREAD_VERSION_MAJOR (EATHREAD_VERSION_N / 100 / 100 % 100)
@@ -114,7 +114,7 @@ EA_RESTORE_VC_WARNING()
 // Defined as 0 or 1
 //
 #ifndef EA_POSIX_THREADS_AVAILABLE
-	#if defined(EA_PLATFORM_UNIX) || defined(EA_PLATFORM_LINUX) || defined(EA_PLATFORM_APPLE)
+	#if defined(__unix__) || defined(__linux__) || defined(__APPLE__) 
 		#define EA_POSIX_THREADS_AVAILABLE 1
 	#elif defined(EA_PLATFORM_SONY)
 	   #define EA_POSIX_THREADS_AVAILABLE 0  // POSIX threading API is present but use is discouraged by Sony.  They want shipping code to use their scePthreads* API.
@@ -336,13 +336,13 @@ EA_RESTORE_VC_WARNING()
 //
 #ifndef EATHREADLIB_API // If the build file hasn't already defined this to be dllexport...
 	#if EATHREAD_DLL 
-		#if defined(EA_COMPILER_MSVC) || defined(EA_PLATFORM_MINGW)
+		#if defined(_MSC_VER)
 			#define EATHREADLIB_API      __declspec(dllimport)
 			#define EATHREADLIB_LOCAL
-		#elif defined(EA_PLATFORM_CYGWIN)
+		#elif defined(__CYGWIN__)
 			#define EATHREADLIB_API      __attribute__((dllimport))
 			#define EATHREADLIB_LOCAL
-		#elif (defined(__GNUC__) && (__GNUC__ >= 4)) // GCC AND Clang
+		#elif (defined(__GNUC__) && (__GNUC__ >= 4))
 			#define EATHREADLIB_API      __attribute__ ((visibility("default")))
 			#define EATHREADLIB_LOCAL    __attribute__ ((visibility("hidden")))
 		#else
@@ -429,7 +429,7 @@ EA_RESTORE_VC_WARNING()
 // of the operating system (ie: iOS 3) do not provide OS support for 64-bit
 // atomics while later versions (ie: iOS 4/5) do.
 #ifndef EATHREAD_HAS_EMULATED_AND_NATIVE_ATOMICS
-	#if defined(EA_PLATFORM_APPLE)
+	#if defined(__APPLE__)
 		#define EATHREAD_HAS_EMULATED_AND_NATIVE_ATOMICS 1 
 	#else
 		#define EATHREAD_HAS_EMULATED_AND_NATIVE_ATOMICS 0
@@ -444,7 +444,7 @@ EA_RESTORE_VC_WARNING()
 // And even then it's available only some of the time.
 //
 #if !defined(EATHREAD_GLIBC_BACKTRACE_AVAILABLE)
-	#if (defined(EA_COMPILER_CLANG) || defined(EA_COMPILER_GNUC)) && (defined(EA_PLATFORM_LINUX) || defined(EA_PLATFORM_APPLE)) && !defined(EA_PLATFORM_CYGWIN) && !defined(EA_PLATFORM_ANDROID)
+	#if (defined(__clang__) || defined(__GNUC__)) && (defined(EA_PLATFORM_LINUX) || defined(__APPLE__)) && !defined(__CYGWIN__) && !defined(EA_PLATFORM_ANDROID)
 		#define EATHREAD_GLIBC_BACKTRACE_AVAILABLE 1
 	#else
 		#define EATHREAD_GLIBC_BACKTRACE_AVAILABLE 0
@@ -532,14 +532,21 @@ EA_RESTORE_VC_WARNING()
 // If true then the platform supports a user specified thread affinity mask.
 //
 #ifndef EATHREAD_THREAD_AFFINITY_MASK_SUPPORTED
-	#if   defined(EA_PLATFORM_XBOXONE)
+	#if defined(EA_PLATFORM_XBOXONE) || defined(EA_PLATFORM_XBSX)
 		#define EATHREAD_THREAD_AFFINITY_MASK_SUPPORTED 1
 	#elif defined(EA_PLATFORM_SONY)
 		#define EATHREAD_THREAD_AFFINITY_MASK_SUPPORTED 1
-	#elif defined(EA_USE_CPP11_CONCURRENCY) && EA_USE_CPP11_CONCURRENCY
-		// CPP11 doesn't not provided a mechanism to set thread affinities.
+	#elif defined(EA_PLATFORM_IPHONE)
+		// iPhone does not respect thread affinity
+		// https://forums.developer.apple.com/thread/44002
+		// Consider: http://web.mit.edu/darwin/src/modules/xnu/osfmk/man/processor_assign.html
 		#define EATHREAD_THREAD_AFFINITY_MASK_SUPPORTED 0
 	#elif defined(EA_PLATFORM_ANDROID) || defined(EA_PLATFORM_APPLE) || defined(EA_PLATFORM_UNIX)
+		#define EATHREAD_THREAD_AFFINITY_MASK_SUPPORTED 1
+	#elif defined(EA_PLATFORM_NX)
+		#define EATHREAD_THREAD_AFFINITY_MASK_SUPPORTED 1
+	#elif defined(EA_USE_CPP11_CONCURRENCY) && EA_USE_CPP11_CONCURRENCY
+		// CPP11 doesn't not provided a mechanism to set thread affinities.
 		#define EATHREAD_THREAD_AFFINITY_MASK_SUPPORTED 0
 	#else
 		#define EATHREAD_THREAD_AFFINITY_MASK_SUPPORTED 1
@@ -578,7 +585,7 @@ EA_RESTORE_VC_WARNING()
 // EATHREAD_DEBUG_BREAK
 //
 #ifndef EATHREAD_DEBUG_BREAK
-	#ifdef EA_COMPILER_MSVC
+	#ifdef __MSC_VER
 		#define EATHREAD_DEBUG_BREAK() __debugbreak()
 	#else
 		#define EATHREAD_DEBUG_BREAK() *(volatile int*)(0) = 0
@@ -616,20 +623,6 @@ namespace detail {
 #ifndef EATHREAD_ALIGNMENT_CHECK
 	#define EATHREAD_ALIGNMENT_CHECK(address) EAT_ASSERT_MSG(EA::Thread::detail::IsNaturallyAligned(address), "address is not naturally aligned.")	
 #endif
-
-
-///////////////////////////////////////////////////////////////////////////////
-// EATHREAD_APPLE_GETMODULEINFO_ENABLED 
-//
-// This functionality has been migrated to EACallstack.  We provide a preprocessor switch for backwards compatibility
-// until the code path is removed completely in a future release.
-//
-// Defined as 0 or 1. 
-//
-#ifndef EATHREAD_APPLE_GETMODULEINFO_ENABLED 
-	#define EATHREAD_APPLE_GETMODULEINFO_ENABLED 0
-#endif
-
 
 
 #endif // Header include guard

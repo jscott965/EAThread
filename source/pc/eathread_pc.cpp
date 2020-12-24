@@ -326,7 +326,7 @@ EATHREADLIB_API EA::Thread::ThreadId EA::Thread::GetThreadId(EA::Thread::SysThre
 
 EATHREADLIB_API EA::Thread::SysThreadId EA::Thread::GetSysThreadId(ThreadId id)
 {
-	#if defined(EA_PLATFORM_MICROSOFT) && defined(EA_PROCESSOR_X86_64)
+	#if defined(EA_PLATFORM_MICROSOFT) && (defined(EA_PROCESSOR_X86_64) || defined(EA_PROCESSOR_ARM64))
 		// Win64 has this function natively.
 		return ::GetThreadId(id);
 
@@ -418,7 +418,7 @@ EATHREADLIB_API bool EA::Thread::SetThreadPriority(int nPriority)
 
 	// Windows process running in NORMAL_PRIORITY_CLASS is picky about the priority passed in.
 	// So we need to set the priority to the next priority supported
-	#if defined(EA_PLATFORM_WINDOWS) || defined(EA_PLATFORM_XBOXONE)
+	#if defined(EA_PLATFORM_WINDOWS) || defined(EA_PLATFORM_XBOXONE) || defined(EA_PLATFORM_XBSX)
 		HANDLE thread = GetCurrentThread();
 
 		while(!result)
@@ -440,7 +440,7 @@ EATHREADLIB_API bool EA::Thread::SetThreadPriority(int nPriority)
 
 EATHREADLIB_API void EA::Thread::SetThreadProcessor(int nProcessor)
 {
-	#if   defined(EA_PLATFORM_XBOXONE)
+	#if defined(EA_PLATFORM_XBOXONE) || defined(EA_PLATFORM_XBSX)
 
 		DWORD mask = 0xFF; //Default to all
 		if (nProcessor >= 0)
@@ -472,7 +472,7 @@ EATHREADLIB_API void EA::Thread::SetThreadProcessor(int nProcessor)
 
 void* EA::Thread::GetThreadStackBase()
 {
-	#if   defined(EA_PLATFORM_WIN32) && defined(EA_PROCESSOR_X86) && defined(EA_COMPILER_MSVC)
+	#if defined(EA_PLATFORM_WIN32) && defined(EA_PROCESSOR_X86) && defined(EA_COMPILER_MSVC)
 		// Offset 0x18 from the FS segment register gives a pointer to
 		// the thread information block for the current thread
 		// VC++ also offers the __readfsdword() intrinsic, which would be better to use here.
@@ -492,6 +492,10 @@ void* EA::Thread::GetThreadStackBase()
 
 		return (void*)pTib->StackBase;
 
+	#elif defined(EA_PLATFORM_MICROSOFT) && defined(EA_PROCESSOR_ARM64) && defined(EA_COMPILER_MSVC)
+		// TODO(rparolin): Requires an ARM64 implementation.
+		return nullptr;
+
 	#elif defined(EA_PLATFORM_WIN32) && defined(EA_PROCESSOR_X86) && defined(EA_COMPILER_GCC)
 		NT_TIB* pTib;
 
@@ -504,7 +508,7 @@ void* EA::Thread::GetThreadStackBase()
 }
 
 
-#if defined(EA_PLATFORM_WIN32) && defined(EA_PROCESSOR_X86) && defined(EA_COMPILER_MSVC) && (EA_COMPILER_VERSION >= 1400)
+#if defined(EA_PLATFORM_WIN32) && defined(EA_PROCESSOR_X86) && defined(_MSC_VER) && (_MSC_VER >= 1400)
 	// People report on the Internet that this function can get you what CPU the current thread
 	// is running on. But that's false, as this function has been seen to return values greater than
 	// the number of physical or real CPUs present. For example, this function returns 6 for my 
@@ -547,7 +551,7 @@ EATHREADLIB_API int EA::Thread::GetThreadProcessor()
 		if(pfnGetCurrentProcessorNumber)
 			return (int)(unsigned)pfnGetCurrentProcessorNumber();
 
-		#if defined(EA_PLATFORM_WINDOWS) && defined(EA_PROCESSOR_X86) && defined(EA_COMPILER_MSVC) && (EA_COMPILER_MSVC >= 1400)
+		#if defined(EA_PLATFORM_WINDOWS) && defined(EA_PROCESSOR_X86) && defined(_MSC_VER) && (_MSC_VER >= 1400)
 			return GetCurrentProcessorNumberXP();
 		#else
 			return 0;
@@ -587,7 +591,7 @@ EATHREADLIB_API void EA::Thread::SetThreadAffinityMask(const EA::Thread::ThreadI
 	}
 
 #if EATHREAD_THREAD_AFFINITY_MASK_SUPPORTED
-	#if defined(EA_PLATFORM_XBOXONE)
+	#if defined(EA_PLATFORM_XBOXONE) || defined(EA_PLATFORM_XBSX)
 		DWORD_PTR nProcessorCountMask = 0x7F;  // default to all 7 available cores.
 	#else
 		DWORD_PTR nProcessorCountMask = (DWORD_PTR)1 << GetProcessorCount(); 
@@ -629,7 +633,7 @@ namespace Internal {
 
 		bool result = true;
 
-	#if (defined(EA_PLATFORM_XBOXONE) && EA_CAPILANO_DBG_ENABLED == 1)
+	#if (defined(EA_PLATFORM_XBOXONE) || defined(EA_PLATFORM_XBSX)) && EA_XBOX_DBG_ENABLED == 1
 		wchar_t wName[EATHREAD_NAME_SIZE];
 		mbstowcs(wName, pName, EATHREAD_NAME_SIZE);
 		result = (::SetThreadName(threadId, wName) == TRUE); // requires toolhelpx.lib
@@ -641,12 +645,17 @@ namespace Internal {
 
 	bool WinSetThreadName(EA::Thread::ThreadId threadId, const char* pName)
 	{
-		bool result = true;
-
+	#if defined(EA_PLATFORM_XBOXONE) || defined(EA_PLATFORM_XBSX)
+		static auto pSetThreadDescription = SetThreadDescription;
+	#else
 		typedef HRESULT(WINAPI *SetThreadDescription)(HANDLE hThread, PCWSTR lpThreadDescription);
 
 		// Check if Windows Operating System has the 'SetThreadDescription" API.
-		auto pSetThreadDescription = (SetThreadDescription)GetProcAddress(GetModuleHandleA("kernel32.dll"), "SetThreadDescription");
+		static auto pSetThreadDescription = (SetThreadDescription)GetProcAddress(GetModuleHandleA("kernel32.dll"), "SetThreadDescription");
+	#endif
+
+		bool result = true;
+
 		if (pSetThreadDescription)
 		{
 			wchar_t wName[EATHREAD_NAME_SIZE];
@@ -676,7 +685,8 @@ namespace Internal {
 
 		jmp_buf jmpbuf;
 
-		EA_DISABLE_VC_WARNING(4611)
+		__pragma(warning(push))
+		__pragma(warning(disable : 4611))
 		if (!setjmp(jmpbuf))
 		{
 			ThreadNameInfo threadNameInfo = {0x1000, pName, threadId, 0};
@@ -684,7 +694,7 @@ namespace Internal {
 			__except (GetExceptionCode() == 0x406D1388 ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) { }
 			longjmp(jmpbuf, 1);
 		}
-		EA_RESTORE_VC_WARNING()
+		__pragma(warning(pop))
 	}
 
 	void SetThreadName(EAThreadDynamicData* pTDD, const char* pName)
@@ -692,7 +702,7 @@ namespace Internal {
 		strncpy(pTDD->mName, pName, EATHREAD_NAME_SIZE);
 		pTDD->mName[EATHREAD_NAME_SIZE - 1] = 0;
 
-	#if defined(EA_PLATFORM_WINDOWS) && defined(EA_COMPILER_MSVC) || (defined(EA_PLATFORM_XBOXONE))
+	#if defined(EA_PLATFORM_WINDOWS) && defined(_MSC_VER) || (defined(EA_PLATFORM_XBOXONE) || defined(EA_PLATFORM_XBSX))
 		if(pTDD->mName[0] && (pTDD->mhThread != EA::Thread::kThreadIdInvalid))
 		{
 			#if EATHREAD_NAMING == EATHREAD_NAMING_DISABLED
@@ -736,7 +746,7 @@ EATHREADLIB_API const char* EA::Thread::GetThreadName(const EA::Thread::ThreadId
 
 EATHREADLIB_API int EA::Thread::GetProcessorCount()
 {
-	#if defined(EA_PLATFORM_XBOXONE)
+	#if defined(EA_PLATFORM_XBOXONE) || defined(EA_PLATFORM_XBSX)
 		// Capilano has 7-ish physical CPUs available to titles.  We can access 50 - 90% of the 7th Core.  
 		// Check platform documentation for details.
 	    DWORD_PTR ProcessAffinityMask;
@@ -818,12 +828,12 @@ void EA::Thread::ThreadEnd(intptr_t threadReturnValue)
 
 	EA::Thread::SetCurrentThreadHandle(kThreadIdInvalid, true); // We use 'true' here just to be safe, as we don't know who is calling this function.
 
-	#if defined(EA_PLATFORM_XBOXONE)
+	#if defined(EA_PLATFORM_XBOXONE) || defined(EA_PLATFORM_XBSX)
 		// _endthreadex is not supported on Capilano because it's not compatible with C++/CX and /ZW.  Use of ExitThread could result in memory leaks
 		// as ExitThread does not clean up memory allocated by the C runtime library.
 		// https://forums.xboxlive.com/AnswerPage.aspx?qid=47c1607c-bb18-4bc4-a79a-a40c59444ff3&tgt=1        
 		ExitThread(static_cast<DWORD>(threadReturnValue));
-	#elif defined(EA_PLATFORM_MICROSOFT) && defined(EA_PLATFORM_CONSOLE) && !defined(EA_PLATFORM_XBOXONE)
+	#elif defined(EA_PLATFORM_MICROSOFT) && defined(EA_PLATFORM_CONSOLE) && !defined(EA_PLATFORM_XBOXONE) && !defined(EA_PLATFORM_XBSX)
 		EAT_FAIL_MSG("EA::Thread::ThreadEnd: Not supported by this platform.");
 	#else
 		_endthreadex((unsigned int)threadReturnValue);
@@ -867,7 +877,7 @@ EATHREADLIB_API void EA::Thread::AssertionFailure(const char* pExpression)
 			OutputDebugStringA("EA::Thread::AssertionFailure: ");
 			OutputDebugStringA(pExpression);
 			OutputDebugStringA("\n");
-			#ifdef EA_COMPILER_MSVC
+			#ifdef _MSC_VER
 				__debugbreak();
 			#endif
 		#endif
